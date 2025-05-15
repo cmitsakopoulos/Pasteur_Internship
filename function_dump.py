@@ -120,10 +120,17 @@ def calculate_cdr_chars(df):
             except Exception as e:
                 print(f"Row {idx}: failed to analyze antigen ({e})")
             else:
-                df.at[idx, 'h3_gravy']               = agn_3.gravy()
-                df.at[idx, 'h3_pI']                  = agn_3.isoelectric_point()
-                df.at[idx, 'h3_net_charge_normal']   = agn_3.charge_at_pH(7.35)
-                df.at[idx, 'h3_net_charge_inflamed'] = agn_3.charge_at_pH(5.5)
+                val = agn_3.gravy()
+                df.at[idx, 'h3_gravy'] = float(f"{val:.5g}")
+
+                val = agn_3.isoelectric_point()
+                df.at[idx, 'h3_pI'] = float(f"{val:.5g}")
+
+                val = agn_3.charge_at_pH(7.35)
+                df.at[idx, 'h3_net_charge_normal'] = float(f"{val:.5g}")
+
+                val = agn_3.charge_at_pH(5.5)
+                df.at[idx, 'h3_net_charge_inflamed'] = float(f"{val:.5g}")
                 df.at[idx, 'h3_is_incomplete']       = is_incomplete_3
                 df.at[idx, "h3_N_gylcosylation_sites"] = find_N_glycosilation(h3_seq)
                 df.at[idx, "h3_O_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
@@ -140,10 +147,17 @@ def calculate_cdr_chars(df):
             except Exception as e:
                 print(f"Row {idx}: failed to analyze light chain ({e})")
             else:
-                df.at[idx, 'l3_gravy']               = agn_2.gravy()
-                df.at[idx, 'l3_pI']                  = agn_2.isoelectric_point()
-                df.at[idx, 'l3_net_charge_normal']   = agn_2.charge_at_pH(7.35)
-                df.at[idx, 'l3_net_charge_inflamed'] = agn_2.charge_at_pH(5.5)
+                val = agn_2.gravy()
+                df.at[idx, 'l3_gravy'] = float(f"{val:.5g}")
+
+                val = agn_2.isoelectric_point()
+                df.at[idx, 'l3_pI'] = float(f"{val:.5g}")
+
+                val = agn_2.charge_at_pH(7.35)
+                df.at[idx, 'l3_net_charge_normal'] = float(f"{val:.5g}")
+
+                val = agn_2.charge_at_pH(5.5)
+                df.at[idx, 'l3_net_charge_inflamed'] = float(f"{val:.5g}")
                 df.at[idx, 'l3_is_incomplete']       = is_incomplete_2
                 df.at[idx, "l3_N_gylcosylation_sites"] = find_N_glycosilation(l3_seq)
                 df.at[idx, "l3_O_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
@@ -179,11 +193,19 @@ def calculate_antigen_chars(df):
             except Exception as e:
                 print(f"Row {idx}: failed to analyze antigen ({e})")
             else:
-                df.at[idx, 'antigen_gravy']               = agn.gravy()
-                df.at[idx, 'antigen_pI']                  = agn.isoelectric_point()
-                df.at[idx, 'antigen_net_charge_normal']   = agn.charge_at_pH(7.35)
-                df.at[idx, 'antigen_net_charge_inflamed'] = agn.charge_at_pH(5.5)
+                val = agn.gravy()
+                df.at[idx, 'antigen_gravy'] = float(f"{val:.5g}")
+
+                val = agn.isoelectric_point()
+                df.at[idx, 'antigen_pI'] = float(f"{val:.5g}")
+
+                val = agn.charge_at_pH(7.35)
+                df.at[idx, 'antigen_net_charge_normal'] = float(f"{val:.5g}")
+
+                val = agn.charge_at_pH(5.5)
+                df.at[idx, 'antigen_net_charge_inflamed'] = float(f"{val:.5g}")
                 df.at[idx, 'antigen_is_incomplete']       = is_incomplete
+
     return df
 
 def inspect_verbose(df):
