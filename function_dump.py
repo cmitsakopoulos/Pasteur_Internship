@@ -93,14 +93,12 @@ def parser(df):
                 row['l3_chain'] = new_row["light_cdr3"]
                 row['database_origin'] = new_row["dataset"]
                 basic_records.append(row)
+                return pd.DataFrame(basic_records)
     #Convert the lists to separate dataframes
     antigen_df = pd.DataFrame(antigen_records)
     cdr_df = pd.DataFrame(cdr_records)
     #Return based on use case
-    if antigen_df and cdr_df:
-        return antigen_df, cdr_df
-    else:
-        return pd.DataFrame(basic_records)
+    return antigen_df, cdr_df        
 
 def calculate_cdr_chars(df):
     #Check for pre-existing columns
@@ -113,7 +111,7 @@ def calculate_cdr_chars(df):
         if not h3_seq:
             print(f"Row {idx} has no H3 sequence.")
         else:
-            is_incomplete_3 = 'X' in h3_seq
+            is_incomplete_3 = int('X' in h3_seq)
             clean_seq_h3     = h3_seq.replace('X', '')
             try:
                 agn_3 = ProteinAnalysis(clean_seq_h3)
@@ -140,7 +138,7 @@ def calculate_cdr_chars(df):
         if not l3_seq:
             print(f"Row {idx} has no L3 sequence.")
         else:
-            is_incomplete_2 = 'X' in l3_seq
+            is_incomplete_2 = int('X' in l3_seq)
             clean_seq_l3     = l3_seq.replace('X', '')
             try:
                 agn_2 = ProteinAnalysis(clean_seq_l3)
@@ -181,12 +179,11 @@ def calculate_antigen_chars(df):
         df[col] = float('nan')
 
     for idx, row in df.iterrows():
-        print(f"Processing row {idx} sequence data")
         antigen = row.get('antigen_seq')
         if not antigen:
             print(f"Row {idx} has no antigen sequence.")
         else:
-            is_incomplete = 'X' in antigen
+            is_incomplete = int('X' in antigen)
             clean_seq     = antigen.replace('X', '')
             try:
                 agn = ProteinAnalysis(clean_seq)
