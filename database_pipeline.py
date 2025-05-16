@@ -5,6 +5,7 @@ import pandas as pd
 import click
 from abc import ABC, abstractmethod
 from typing import Dict
+from concurrent.futures import ProcessPoolExecutor
 
 from function_dump import (
     extractor,
@@ -125,22 +126,29 @@ class FlattenDuplicates(Step):
 class Walker(Step):
     def __init__(self, input_path: str):
         self.input_path = input_path
+
+    @staticmethod
+    def _process_file(args):
+        filepath, idx = args
+        df_raw = extractor(filepath)
+        antigen_df, cdr_df = parser(df_raw)
+        return filepath, idx, antigen_df, cdr_df
+
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
+        tasks = []
         count = 0
         for root, _, files in os.walk(self.input_path):
             for fname in files:
                 if not fname.lower().endswith('.csv'):
                     continue
-                filepath = os.path.join(root, fname)
                 count += 1
-                try:
-                    df_raw = extractor(filepath)
-                    antigen_df, cdr_df = parser(df_raw)
-                except Exception as e:
-                    print(f"Warning: failed to extract {filepath!r}: {e}", file=sys.stderr)
-                    continue
-                base_key = f"csv{count}"
+                filepath = os.path.join(root, fname)
+                tasks.append((filepath, count))
+        # 2) Parallel extraction + parsing
+        with ProcessPoolExecutor(max_workers=2) as executor:
+            for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
+                base_key = f"csv{idx}"
                 new_data[f"antigen_{base_key}"] = antigen_df
                 new_data[f"cdr_{base_key}"]      = cdr_df
                 print(
@@ -148,5 +156,4 @@ class Walker(Step):
                     f"antigen rows={antigen_df.shape[0]}, "
                     f"cdr rows={cdr_df.shape[0]}"
                 )
-    
         return new_data

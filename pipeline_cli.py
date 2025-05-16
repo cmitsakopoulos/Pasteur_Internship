@@ -18,6 +18,12 @@ from function_dump import (
     inspect_verbose,
 )
 
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option("1.0")
+def cli():
+    """Database Pipeline CLI."""
+    pass
+
 RECIPES = {
     "test": [
         Walker,
@@ -37,8 +43,7 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
     steps = [step(path) if step is Walker else step() for step in RECIPES[recipe]]
     return Pipeline(steps)
 
-@click.command()
-@click.version_option("1.0")
+@cli.command(name="run", help="Run a configured pipeline recipe on all CSVs under a directory.")
 @click.option(
     "--simple",
     "recipe",
@@ -52,14 +57,8 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
     flag_value="complete",
     help='Run the "complete" recipe'
 )
-@click.option(
-    "--clean",
-    "recipe",
-    flag_value="clean",
-    help='Run the "clean" recipe'
-)
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
-def cli(recipe: str, path: str):
+def run(recipe: str, path: str):
     click.echo(f"▶ Using recipe '{recipe}' on '{path}'")
     start = time.time()
     pipeline = build_pipeline(recipe, path)
@@ -67,14 +66,11 @@ def cli(recipe: str, path: str):
     elapsed = time.time() - start
     click.echo(f"✔ Done in {elapsed:.2f} seconds.")
 
-@cli.command()
+@cli.command(name="inspect", help="Inspect a single CSV file without running the pipeline.")
 @click.argument("csv_path", type=click.Path(exists=True, dir_okay=False))
-@click.option("-v", "--verbose", is_flag=True,
-              help="Print every field for each row")
-def inspect(csv_path: str, verbose: bool):
-    """
-    Quickly inspect a single CSV file without running the full pipeline.
-    """
+@click.option("-v", "--verbose", is_flag=True, help="Print every field for each row")
+def inspect_cmd(csv_path: str, verbose: bool):
+    """Quickly inspect a single CSV."""
     df = pd.read_csv(csv_path)
     if verbose:
         click.echo("🛈 Verbose inspection:\n")
