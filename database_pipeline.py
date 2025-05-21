@@ -1,8 +1,7 @@
 import os
-import sys
 import datetime
 import pandas as pd
-import click
+import re
 from abc import ABC, abstractmethod
 from typing import Dict
 from concurrent.futures import ProcessPoolExecutor
@@ -16,6 +15,7 @@ from function_dump import (
 
 #Separation of all application functions into steps, which are brought together in a recipe like way, to accomplish different tasks; aka chem, clean, or extract from version 1 (=version lame) of this program.
 #Object oriented approach, where dfs are the key object being traded between classes/functions, enables more accesible operation with different file formats. I cannot train my database solely with a former parser that reads only NAstructural database csvs.
+#CLI is connected and feeds a list of steps depending on the type of recipe the user wants to use: ex. complete to do a full treatment of teh raw data, or simple for testing purposes. Inspect clauses are handled independently. I preferred inspection with manually created functions, because pandas is nicer than dunder methods. 
 
 class Pipeline:
     def __init__(self, steps):
@@ -61,7 +61,7 @@ class Write(Step):
         # Ensure directory exists; else we die
         output_dir = os.path.join(os.path.dirname(__file__), "Computation_Deposit")
         os.makedirs(output_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") #can remove if you want, obviously
         for key, df in data.items():
             filename = f"{key}_{ts}.csv"
             filepath = os.path.join(output_dir, filename)
@@ -74,15 +74,16 @@ class Write(Step):
 class CDRComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
+        #Catch the antigen dataframes, remember that Walker will name the files antigen_csv or cdr_csv something
         if 'antigen' in data:
-            new_data['antigen'] = data['antigen']
+            new_data['antigen'] = data['antigen'] #each step replaces the previous data dict for memory conservation and error prevention, so we keep the info manually.
         if 'cdr' in data:
-            df = data['cdr']
+            df = data['cdr'] 
             calculate_cdr_chars(df)
             new_data['cdr'] = df
         if 'cdr' in new_data:
             print(f"CDRComputation → processed cdr, rows: {new_data['cdr'].shape[0]}")
-        return new_data
+        return new_data #return "mutated" dataframe, feed back into the system
 
 class AntigenComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
@@ -103,9 +104,31 @@ class FlattenDuplicates(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
-            new_data['cdr'] = data['cdr']
+            cdr_df = data['cdr']
+            if not cdr_df['h3_chain'].duplicated().any(): #Forgot to add a clause by which if there are no duplicates, we skip...AND return the df as is
+                print(f"FlattenDuplicates → no CDR duplicates found, keeping {len(cdr_df)} rows")
+                new_data['cdr'] = cdr_df
+                return new_data
+            new_dict = {
+                col: 'first'
+                for col in cdr_df.columns
+                if col not in ('h3_chain', 'pdb_id')
+            }
+            new_dict['pdb_id'] = lambda ids: list(ids.unique())
+            flat_df = (
+                cdr_df
+                .groupby('h3_chain')
+                .agg(new_dict)
+                .reset_index()
+            )
+            new_data['cdr'] = flat_df
+
         if 'antigen' in data:
             df = data['antigen']
+            if not df['antigen_seq'].duplicated().any(): 
+                print(f"FlattenDuplicates → no Antigen duplicates found, keeping {len(df)} rows")
+                new_data['antigen'] = df
+                return new_data
             agg_dict = {
                 col: 'first'
                 for col in df.columns
@@ -122,7 +145,9 @@ class FlattenDuplicates(Step):
         if 'antigen' in new_data:
             print(f"FlattenDuplicates → flattened antigen, rows: {new_data['antigen'].shape[0]}")
         return new_data
+    
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
+#Parallelisation method to improve computational time is AI assisted code, any problems that arise are not my fault; none discovered for now.
 class Walker(Step):
     def __init__(self, input_path: str):
         self.input_path = input_path
@@ -145,7 +170,6 @@ class Walker(Step):
                 count += 1
                 filepath = os.path.join(root, fname)
                 tasks.append((filepath, count))
-        # 2) Parallel extraction + parsing
         with ProcessPoolExecutor(max_workers=2) as executor:
             for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
                 base_key = f"csv{idx}"
@@ -156,4 +180,65 @@ class Walker(Step):
                     f"antigen rows={antigen_df.shape[0]}, "
                     f"cdr rows={cdr_df.shape[0]}"
                 )
+        return new_data
+
+#Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
+class RmPurificationTags(Step):
+    def __init__(self):#Each class is only instantiated once as it is a componenent in the larger recipe called by the cli, so this, which is normally bad practice, ill leave, as it makes no difference due to being instantiated just once/just how I know how to do it...
+        # we compile the pattern for motifs once, then it looks for it hopefully finds it..
+        self. motifs = {
+            "c-Myc": "EQKLISEEDL",
+            "6-His": "HHHHHH",
+            "5-His": "HHHHH", #Seems like in the NAStructural DB, some of the antigenic sequences have N or C-terminal pentameric His-tags attached...accidental clipping of the sequence at the ends?!
+            "FLAG":  "DYKDDDDK",
+            "V5":    "GKPIPNPLLGLDST",
+        }
+        self.max_gap = 6 #Change if you want to make the gap between purifiaction tag motifs smaller...
+        #Preparing for alteration (aka so that "re" can look for c-Myc OR '|' FLAG OR/AND 6-His)
+        self.alteration = "|".join(map(re.escape, self.motifs.values()))
+        # one motif, followed by 0-N chunks of ≤7 AAs + another motif
+        self.clusters = re.compile(
+            rf'(?:{self.alteration}(?:[A-Z]{{1,{self.max_gap}}}{self.alteration})*)'
+        ) #create a rubric for the purging to occur later
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data: Dict[str, pd.DataFrame] = {}
+        if "cdr" in data: # pass cdr through unchanged
+            new_data["cdr"] = data["cdr"]
+        if "antigen" in data:
+            df = data["antigen"]
+            for idx, seq in df["antigen_seq"].items():
+                df.at[idx, "antigen_seq"] = self.clusters.sub("", seq)
+            new_data["antigen"] = df
+        return new_data
+    
+class AssignIDs(Step):
+    def __init__(self): #Each class is only instantiated once as it is a componenent in the larger recipe called by the cli, so this which is normally bad practice, ill leave as it makes no difference due to being instantiated just once/just how I know how to do it...
+        self.amino_acid_rubric = {
+        'A': 1,  'C': 2,  'D': 3,  'E': 4,  'F': 5,
+        'G': 6,  'H': 7,  'I': 8,  'K': 9,  'L':10,
+        'M':11,  'N':12,  'P':13,  'Q':14,  'R':15,
+        'S':16,  'T':17,  'V':18,  'W':19,  'Y':20,}
+        self.re_pattern = re.compile(r'[ACDEFGHIKLMNPQRSTVWY]')
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data: Dict[str, pd.DataFrame] = {}
+        if 'cdr' in data:
+            cdr_df = data["cdr"]
+            cdr_df["cdr_computed_id"] = pd.NA #Introduce new column for our computed id
+            for idx, seq in cdr_df["h3_chain"].items():
+                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the filtering done before didnt work; maybe we dont only have ambiguous X, maybe there are additional characters
+                    raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
+                else:
+                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Replace AAs with encodings
+                    cdr_df.at[idx, "cdr_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+"))) #Sum the AA encodings
+            new_data["cdr"] = cdr_df
+        if "antigen" in data:
+            ant_df = data["antigen"]
+            cdr_df["cdr_computed_id"] = pd.NA 
+            for idx, seq in ant_df["antigen_seq"].items():
+                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq):
+                    raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
+                else:
+                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq)
+                    ant_df.at[idx, "antigen_computed_df"] = sum(map(int, numeric_str.rstrip("+").split("+")))
+            new_data["antigen"] = ant_df
         return new_data

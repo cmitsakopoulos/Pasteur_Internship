@@ -7,3 +7,5 @@ __pycache__/
 *.py[cod]
 *$py.class
 Computation_Deposit/
+data_storage/
+staging.sql

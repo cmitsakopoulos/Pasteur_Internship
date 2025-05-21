@@ -27,6 +27,7 @@ def cli():
 RECIPES = {
     "test": [
         Walker,
+        Concatenation,
         Write,
     ],
     "complete": [
@@ -45,9 +46,9 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
 
 @cli.command(name="run", help="Run a configured pipeline recipe on all CSVs under a directory.")
 @click.option(
-    "--simple",
+    "--test",
     "recipe",
-    flag_value="simple",
+    flag_value="test",
     default=True,
     help='Run the "simple" recipe'
 )
