@@ -127,9 +127,9 @@ class FlattenDuplicates(Step):
                 agg_dict = {
                     col: 'first'
                     for col in df.columns
-                    if col not in ('antigen_seq', 'antigen_id')
+                    if col not in ('antigen_seq', 'corresponding_pdb_antibody')
                 }
-                agg_dict['antigen_id'] = lambda ids: list(ids.unique())
+                agg_dict['corresponding_pdb_antibody'] = lambda ids: list(ids.unique())
                 flat_df = (
                     df
                     .groupby('antigen_seq')
@@ -242,3 +242,11 @@ class AssignIDs(Step):
             new_data["antigen"] = ant_df
             print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
+    
+class ComputeRelationships(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data: Dict[str, pd.DataFrame] = {}
+        antigenic_rows = data["antigen"].copy()
+        cdr_rows = data["cdr"].copy()
+        for idx, text in antigenic_rows.iterrows():
+            print

@@ -3,8 +3,8 @@ DROP TABLE IF EXISTS cdr3_primary;
 DROP TABLE IF EXISTS cdr3_central;
 DROP TABLE IF EXISTS antigen_central;
 
-CREATE TABLE main.antigen_central (
-    antigen_id          VARCHAR(12)      PRIMARY KEY,
+CREATE TABLE antigen_central (
+    antigen_id          VARCHAR(12)      PRIMARY KEY, 
     name                TEXT,
     species             TEXT,
     method              TEXT,
@@ -13,7 +13,7 @@ CREATE TABLE main.antigen_central (
     last_update         TIMESTAMPTZ
 );
 
-CREATE TABLE main.antigen_primary (
+CREATE TABLE antigen_primary (
     antigen_id VARCHAR(12) PRIMARY KEY,
     sequence   TEXT,
     CONSTRAINT fk_antigen_primary_to_central
@@ -23,7 +23,7 @@ CREATE TABLE main.antigen_primary (
 CREATE INDEX idx_antigen_primary_antigen_id
   ON antigen_primary (antigen_id);
 
-CREATE TABLE main.antigen_chemical (
+CREATE TABLE antigen_chemical (
     antigen_id              VARCHAR(12) PRIMARY KEY,
     isoelectric             NUMERIC(6,4),
     gravy_score             NUMERIC(6,4),
@@ -36,7 +36,7 @@ CREATE TABLE main.antigen_chemical (
 CREATE INDEX idx_antigen_chemical_antigen_id
   ON antigen_chemical (antigen_id);
 
-CREATE TABLE main.cdr3_central (
+CREATE TABLE cdr3_central (
     cdr3_id             VARCHAR(4)    PRIMARY KEY,
     antigen_id          VARCHAR(12)   NOT NULL
       REFERENCES antigen_central(antigen_id),
@@ -52,7 +52,7 @@ CREATE TABLE main.cdr3_central (
 CREATE INDEX idx_cdr3_central_antigen_id
   ON cdr3_central (antigen_id);
 
-CREATE TABLE main.cdr3_primary (
+CREATE TABLE cdr3_primary (
     cdr3_id     VARCHAR(4) PRIMARY KEY,
     sequence    TEXT,
     CONSTRAINT fk_cdr3_primary_to_central
@@ -60,7 +60,7 @@ CREATE TABLE main.cdr3_primary (
       REFERENCES cdr3_central(cdr3_id)
 );
 
-CREATE TABLE main.cdr3_chemical (
+CREATE TABLE cdr3_chemical (
     cdr3_id            VARCHAR(4)   PRIMARY KEY,
     gravy              NUMERIC(6,4),
     isoelectric        NUMERIC(6,4),

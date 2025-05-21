@@ -79,7 +79,7 @@ def parser(df):
                 parts = l3_h3.split('_', 1) #max one split
                 cdr_row['l3_chain'] = parts[0] if len(parts) > 0 else None
                 cdr_row['h3_chain'] = parts[1] if len(parts) > 1 else None
-                antigen_row['antigen_id'] = f"{basic_dict.get('pdb_id')}_antigen"
+                antigen_row['corresponding_pdb_antibody'] = f"{basic_dict.get('pdb_id')}"
             #Append the rows to the records lists separately
             cdr_records.append(cdr_row)
             antigen_records.append(antigen_row)
