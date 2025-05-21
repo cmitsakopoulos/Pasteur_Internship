@@ -20,7 +20,7 @@ from function_dump import (
     inspect_verbose,
 )
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(context_settings={"help_option_names": ["--help"]})
 @click.version_option("1.0")
 def cli():
     """Database Pipeline CLI."""
@@ -54,13 +54,13 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
     "recipe",
     flag_value="test",
     default=True,
-    help='Run the "simple" recipe'
+    help='Parametre for testing new functions added to the pipeline'
 )
 @click.option(
     "--complete",
     "recipe",
     flag_value="complete",
-    help='Run the "complete" recipe'
+    help='Pefrom parsing, filtration, concatenation, chemical characteristic calculations, purification tag removal, novel ID assignment and print to new csv ready for SQL'
 )
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
 def run(recipe: str, path: str):

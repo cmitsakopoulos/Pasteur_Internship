@@ -105,16 +105,16 @@ class FlattenDuplicates(Step):
                 print(f"FlattenDuplicates → no CDR duplicates found, keeping {len(cdr_df)} rows")
                 new_data['cdr'] = cdr_df
             else:
-                dict = {
+                search_dict = {
                     col: 'first'
                     for col in cdr_df.columns
                     if col not in ('h3_chain', 'pdb_id')
                 }
-                dict['pdb_id'] = lambda ids: list(ids.unique())
+                search_dict['pdb_id'] = lambda ids: list(ids.unique())
                 flat_cdr = (
                     cdr_df
                     .groupby('h3_chain')
-                    .agg(dict)
+                    .agg(search_dict)
                     .reset_index()
                 )
                 new_data['cdr'] = flat_cdr
@@ -206,6 +206,7 @@ class RmPurificationTags(Step):
             for idx, seq in df["antigen_seq"].items():
                 df.at[idx, "antigen_seq"] = self.clusters.sub("", seq)
             new_data["antigen"] = df
+            print(f"RmPurificationTags → cleaned antigenic sequences in the following number of rows: {new_data['antigen'].shape[0]}")
         return new_data
     
 class AssignIDs(Step):
@@ -228,6 +229,7 @@ class AssignIDs(Step):
                     numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Replace AAs with encodings
                     cdr_df.at[idx, "cdr_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+"))) #Sum the AA encodings
             new_data["cdr"] = cdr_df
+            print(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
         if "antigen" in data:
             ant_df = data["antigen"].copy()
             ant_df["antigen_computed_id"] = pd.NA 
@@ -238,4 +240,5 @@ class AssignIDs(Step):
                     numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq)
                     ant_df.at[idx, "antigen_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+")))
             new_data["antigen"] = ant_df
+            print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
