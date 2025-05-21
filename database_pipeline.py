@@ -17,7 +17,7 @@ from function_dump import (
 #Object oriented approach, where dfs are the key object being traded between classes/functions, enables more accesible operation with different file formats. I cannot train my database solely with a former parser that reads only NAstructural database csvs.
 #CLI is connected and feeds a list of steps depending on the type of recipe the user wants to use: ex. complete to do a full treatment of teh raw data, or simple for testing purposes. Inspect clauses are handled independently. I preferred inspection with manually created functions, because pandas is nicer than dunder methods. 
 
-class Pipeline:
+class Pipeline: #Receives a "recipe"/list of Step subclasses needed to produce a desired output
     def __init__(self, steps):
         self.steps = steps
 
@@ -73,27 +73,23 @@ class Write(Step):
 #CHEMICAL CHARACTERISTICS
 class CDRComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = {}
+        new_data: Dict[str, pd.DataFrame] = data.copy() #Copy entire thing then mutate
         #Catch the antigen dataframes, remember that Walker will name the files antigen_csv or cdr_csv something
-        if 'antigen' in data:
-            new_data['antigen'] = data['antigen'] #each step replaces the previous data dict for memory conservation and error prevention, so we keep the info manually.
-        if 'cdr' in data:
-            df = data['cdr'] 
-            calculate_cdr_chars(df)
-            new_data['cdr'] = df
+        if 'cdr' in new_data:
+            computation_cdr_df = new_data["cdr"]
+            calculate_cdr_chars(computation_cdr_df)
+            new_data['cdr'] = computation_cdr_df
         if 'cdr' in new_data:
             print(f"CDRComputation → processed cdr, rows: {new_data['cdr'].shape[0]}")
         return new_data #return "mutated" dataframe, feed back into the system
 
 class AntigenComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = {}
-        if 'cdr' in data:
-            new_data['cdr'] = data['cdr']
+        new_data: Dict[str, pd.DataFrame] = data.copy() 
         if 'antigen' in data:
-            df = data['antigen']
-            calculate_antigen_chars(df)
-            new_data['antigen'] = df
+            computation_antigen_df = new_data["antigen"]
+            calculate_antigen_chars(computation_antigen_df)
+            new_data['antigen'] = computation_antigen_df
         if 'antigen' in new_data:
             print(f"AntigenComputation → processed antigen, rows: {new_data['antigen'].shape[0]}")
         return new_data
@@ -104,46 +100,47 @@ class FlattenDuplicates(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
-            cdr_df = data['cdr']
+            cdr_df = data['cdr'].copy()
             if not cdr_df['h3_chain'].duplicated().any(): #Forgot to add a clause by which if there are no duplicates, we skip...AND return the df as is
                 print(f"FlattenDuplicates → no CDR duplicates found, keeping {len(cdr_df)} rows")
                 new_data['cdr'] = cdr_df
-                return new_data
-            new_dict = {
-                col: 'first'
-                for col in cdr_df.columns
-                if col not in ('h3_chain', 'pdb_id')
-            }
-            new_dict['pdb_id'] = lambda ids: list(ids.unique())
-            flat_df = (
-                cdr_df
-                .groupby('h3_chain')
-                .agg(new_dict)
-                .reset_index()
-            )
-            new_data['cdr'] = flat_df
-
+            else:
+                dict = {
+                    col: 'first'
+                    for col in cdr_df.columns
+                    if col not in ('h3_chain', 'pdb_id')
+                }
+                dict['pdb_id'] = lambda ids: list(ids.unique())
+                flat_cdr = (
+                    cdr_df
+                    .groupby('h3_chain')
+                    .agg(dict)
+                    .reset_index()
+                )
+                new_data['cdr'] = flat_cdr
         if 'antigen' in data:
-            df = data['antigen']
+            df = data['antigen'].copy()
             if not df['antigen_seq'].duplicated().any(): 
                 print(f"FlattenDuplicates → no Antigen duplicates found, keeping {len(df)} rows")
                 new_data['antigen'] = df
-                return new_data
-            agg_dict = {
-                col: 'first'
-                for col in df.columns
-                if col not in ('antigen_seq', 'antigen_id')
-            }
-            agg_dict['antigen_id'] = lambda ids: list(ids.unique())
-            flat_df = (
-                df
-                .groupby('antigen_seq')
-                .agg(agg_dict)
-                .reset_index()
-            )
-            new_data['antigen'] = flat_df
+            else:
+                agg_dict = {
+                    col: 'first'
+                    for col in df.columns
+                    if col not in ('antigen_seq', 'antigen_id')
+                }
+                agg_dict['antigen_id'] = lambda ids: list(ids.unique())
+                flat_df = (
+                    df
+                    .groupby('antigen_seq')
+                    .agg(agg_dict)
+                    .reset_index()
+                )
+                new_data['antigen'] = flat_df
         if 'antigen' in new_data:
             print(f"FlattenDuplicates → flattened antigen, rows: {new_data['antigen'].shape[0]}")
+        if 'cdr' in new_data:
+            print(f"FlattenDuplicates → flattened CDR, rows: {new_data['antigen'].shape[0]}")
         return new_data
     
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
@@ -186,7 +183,7 @@ class Walker(Step):
 class RmPurificationTags(Step):
     def __init__(self):#Each class is only instantiated once as it is a componenent in the larger recipe called by the cli, so this, which is normally bad practice, ill leave, as it makes no difference due to being instantiated just once/just how I know how to do it...
         # we compile the pattern for motifs once, then it looks for it hopefully finds it..
-        self. motifs = {
+        self.motifs = {
             "c-Myc": "EQKLISEEDL",
             "6-His": "HHHHHH",
             "5-His": "HHHHH", #Seems like in the NAStructural DB, some of the antigenic sequences have N or C-terminal pentameric His-tags attached...accidental clipping of the sequence at the ends?!
@@ -203,9 +200,9 @@ class RmPurificationTags(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         if "cdr" in data: # pass cdr through unchanged
-            new_data["cdr"] = data["cdr"]
+            new_data["cdr"] = data["cdr"].copy()
         if "antigen" in data:
-            df = data["antigen"]
+            df = data["antigen"].copy()
             for idx, seq in df["antigen_seq"].items():
                 df.at[idx, "antigen_seq"] = self.clusters.sub("", seq)
             new_data["antigen"] = df
@@ -222,7 +219,7 @@ class AssignIDs(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
-            cdr_df = data["cdr"]
+            cdr_df = data["cdr"].copy()
             cdr_df["cdr_computed_id"] = pd.NA #Introduce new column for our computed id
             for idx, seq in cdr_df["h3_chain"].items():
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the filtering done before didnt work; maybe we dont only have ambiguous X, maybe there are additional characters
@@ -232,13 +229,13 @@ class AssignIDs(Step):
                     cdr_df.at[idx, "cdr_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+"))) #Sum the AA encodings
             new_data["cdr"] = cdr_df
         if "antigen" in data:
-            ant_df = data["antigen"]
-            cdr_df["cdr_computed_id"] = pd.NA 
+            ant_df = data["antigen"].copy()
+            ant_df["antigen_computed_id"] = pd.NA 
             for idx, seq in ant_df["antigen_seq"].items():
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq):
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
                     numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq)
-                    ant_df.at[idx, "antigen_computed_df"] = sum(map(int, numeric_str.rstrip("+").split("+")))
+                    ant_df.at[idx, "antigen_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+")))
             new_data["antigen"] = ant_df
         return new_data

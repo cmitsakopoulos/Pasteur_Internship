@@ -11,6 +11,8 @@ from database_pipeline import (
     AntigenComputation,
     FlattenDuplicates,
     Write,
+    RmPurificationTags,
+    AssignIDs,
 )
 
 from function_dump import (
@@ -34,8 +36,10 @@ RECIPES = {
         Walker,
         Concatenation,
         FlattenDuplicates,
+        RmPurificationTags,
         CDRComputation,
         AntigenComputation,
+        AssignIDs,
         Write,
     ],
 }

@@ -132,6 +132,7 @@ def calculate_cdr_chars(df):
                 df.at[idx, 'h3_is_incomplete']       = is_incomplete_3
                 df.at[idx, "h3_N_gylcosylation_sites"] = find_N_glycosilation(h3_seq)
                 df.at[idx, "h3_O_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
+                df.at[idx, "h3_chain"] = clean_seq_h3
 
         # Light chain CDR3
         l3_seq = row.get('l3_chain')
@@ -159,6 +160,7 @@ def calculate_cdr_chars(df):
                 df.at[idx, 'l3_is_incomplete']       = is_incomplete_2
                 df.at[idx, "l3_N_gylcosylation_sites"] = find_N_glycosilation(l3_seq)
                 df.at[idx, "l3_O_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
+                df.at[idx, "l3_chain"] = clean_seq_l3
 
 # O(n) complexity algorithm, I will not concede to the re automated functions
 def find_N_glycosilation(seq):
@@ -202,6 +204,7 @@ def calculate_antigen_chars(df):
                 val = agn.charge_at_pH(5.5)
                 df.at[idx, 'antigen_net_charge_inflamed'] = float(f"{val:.5g}")
                 df.at[idx, 'antigen_is_incomplete']       = is_incomplete
+                df.at[idx, "antigen_seq"] = clean_seq
 
     return df
 
