@@ -26,6 +26,7 @@ CREATE TABLE antigen_primary (
       FOREIGN KEY (antigen_id)
       REFERENCES antigen_central(antigen_id)
 );
+
 CREATE INDEX index_antigen_with_cdr3
   ON antigen_primary (antigen_id); --Indexing should help with lookup speed especially when automating look up commands for training an AI model....but might need to remove if overhead is too much; if too much ram usage/space usage
 
@@ -36,8 +37,6 @@ CREATE TABLE cdr3_central (
     species             TEXT,
     taxonomy_id         INT,
     last_update         TIMESTAMPTZ);
-CREATE INDEX index_cdr3_with_antigen
-  ON cdr3_central (antigen_id);
 
 CREATE TABLE cdr3_primary (
     cdr3_id     INT PRIMARY KEY,
@@ -63,3 +62,4 @@ CREATE INDEX idx_binding_by_antigen
   ON antigen_antibody_binding (antigen_id);
 
 COMMIT;
+
