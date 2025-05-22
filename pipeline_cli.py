@@ -13,6 +13,7 @@ from database_pipeline import (
     Write,
     RmPurificationTags,
     AssignIDs,
+    ComputeRelationships,
 )
 
 from function_dump import (
@@ -40,6 +41,7 @@ RECIPES = {
         CDRComputation,
         AntigenComputation,
         AssignIDs,
+        ComputeRelationships,
         Write,
     ],
 }

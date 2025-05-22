@@ -1,16 +1,20 @@
 import os
 import datetime
-import pandas as pd
+from concurrent.futures import ProcessPoolExecutor
+from collections import defaultdict
 import re
 from abc import ABC, abstractmethod
 from typing import Dict
-from concurrent.futures import ProcessPoolExecutor
+import pandas as pd
+
+
 
 from function_dump import (
     extractor,
     parser,
     calculate_cdr_chars,
     calculate_antigen_chars,
+    to_list,
 )
 
 #Separation of all application functions into steps, which are brought together in a recipe like way, to accomplish different tasks; aka chem, clean, or extract from version 1 (=version lame) of this program.
@@ -226,7 +230,7 @@ class AssignIDs(Step):
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the filtering done before didnt work; maybe we dont only have ambiguous X, maybe there are additional characters
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Replace AAs with encodings
+                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Replace AAs with encoding
                     cdr_df.at[idx, "cdr_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+"))) #Sum the AA encodings
             new_data["cdr"] = cdr_df
             print(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
@@ -234,7 +238,7 @@ class AssignIDs(Step):
             ant_df = data["antigen"].copy()
             ant_df["antigen_computed_id"] = pd.NA 
             for idx, seq in ant_df["antigen_seq"].items():
-                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq):
+                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the previous functions have worked correctly, I learned this the hard way, however everything should be fine now...could remove in future updates
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
                     numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq)
@@ -242,11 +246,38 @@ class AssignIDs(Step):
             new_data["antigen"] = ant_df
             print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
-    
+
+
+#Bear in mind this algorithm prefers the use of dictionaries to compact data; might not be entirely sound..
+#Importantly, one could use pandas to make use of the C based hash join?! However I am more comfortable with dictionaries and feel that an inner join with pandas might miss out on the multiplicity of connections between different antigen/cdr objects... this is entirely based on vibes
+#Algorithmic complexity is therefore higher than pandas but whatever...preliminary trials showed that to parse throuh the entire NAStructuralDB deduplicated dataset and find 679 relationships, it takes 5 seconds on M1 Macintosh without connection to power supply!
 class ComputeRelationships(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
-        antigenic_rows = data["antigen"].copy()
-        cdr_rows = data["cdr"].copy()
-        for idx, text in antigenic_rows.iterrows():
-            print
+        antigens = data["antigen"].copy()
+        cdrs = data["cdr"].copy()
+        antigen_dict = {}
+        cdr_dict = {}
+        #Populate antigne  dict
+        for idx, content in antigens.iterrows():
+            antigen_dict[idx] = antigens.at[idx, "corresponding_pdb_antibody"]
+        #Populate the cdr dict
+        for idx,  content in cdrs.iterrows():
+            cdr_dict[idx] = cdrs.at[idx, "pdb_id"]
+        pdb_to_cdr = defaultdict(list) #KeyErrors dont fail the code returning an empty list instead...important for missing pdb/antigenid values...
+        for idx, row in cdrs.iterrows():          
+            for pdb in to_list(row["pdb_id"]): #convert to list using AI code ;)
+                pdb_to_cdr[pdb].append(row["cdr_computed_id"])
+        pairs = []
+        for idx, ag in antigens.iterrows():       
+            for pdb in to_list(ag["corresponding_pdb_antibody"]):
+                for cdr_id in pdb_to_cdr.get(pdb, ()):
+                    pairs.append({
+                        "antigen_computed_id": ag["antigen_computed_id"],
+                        "cdr_computed_id": cdr_id
+                    })
+        pairs = pd.DataFrame(pairs)
+        new_data["antigen"] = antigens
+        new_data["cdr"] = cdrs
+        new_data["relationships"] = pairs
+        return new_data

@@ -4,6 +4,7 @@ import csv
 import json
 import re
 import pandas as pd
+import numpy as np
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 
 #For visual purposes, Ive split the functions into a separate file so that it is easier to debug...only personal, literally-obviously zero difference...
@@ -30,7 +31,8 @@ def extractor(filepath):
             expected = ["json", "pdb_id", "heavy", "light", "antigen", "cl_id"]
             if headers != expected:
                 print("NORMAL csv type, reverting to standard CSV read.", file=sys.stderr)
-                return pd.read_csv(filepath) #If its not idiosyncratic
+                non_idiosyncratic_csv = pd.read_csv(filepath)
+                return  non_idiosyncratic_csv#If its not idiosyncratic
             for lineno, row in enumerate(reader, start=2):
                 if len(row) != 6:
                     print(f"Line {lineno}: expected 6 columns, got {len(row)}", file=sys.stderr)
@@ -84,16 +86,31 @@ def parser(df):
             cdr_records.append(cdr_row)
             antigen_records.append(antigen_row)
     else: #MODULATE THIS FOR NEW CSVS, CANNOT BE BOTHERED TO ACCOMODATE EVERY USE CASE; MAYBE IN THE FUTURE
-            basic_records = []
+            cdr_records = []
+            antigen_records = []
             for idx, new_row in df.iterrows():
-                row = {}
-                row['pdb_id'] = new_row['pdb_name']
-                row["antigen_seq"] = new_row["antigen_sequence"]
-                row["h3_chain"] = new_row["heavy_cdr3"]
-                row['l3_chain'] = new_row["light_cdr3"]
-                row['database_origin'] = new_row["dataset"]
-                basic_records.append(row)
-                return pd.DataFrame(basic_records)
+                cdr_row = {}
+                antigen_row = {}
+                antigen_row['corresponding_pdb_antibody'] = new_row['pdb_name']
+                cdr_row['pdb_id'] = new_row['pdb_name']
+                antigen_row["antigen_seq"] = new_row["antigen_sequence"]
+                cdr_row["h3_chain"] = new_row["heavy_cdr3"]
+                cdr_row['l3_chain'] = new_row["light_cdr3"]
+                cdr_row['database_origin'] = new_row["dataset"]
+                antigen_row['database_origin'] = new_row["dataset"]
+                cdr_row['heavy_taxonomy_id'] = pd.NA
+                cdr_row['heavy_host_organism_name'] = pd.NA
+                antigen_row['antigen_organism_name'] = pd.NA
+                antigen_row['antigen_host_organism'] = pd.NA
+                antigen_row['antigen_taxonomy_id'] = pd.NA
+                cdr_row['resolution'] = pd.NA
+                cdr_row['method'] = pd.NA
+                cdr_row['last_update'] = pd.NA
+                antigen_row['resolution'] = pd.NA
+                antigen_row['method'] = pd.NA
+                antigen_row['last_update'] = pd.NA
+                cdr_records.append(cdr_row)
+                antigen_records.append(antigen_row)
     #Convert the lists to separate dataframes
     antigen_df = pd.DataFrame(antigen_records)
     cdr_df = pd.DataFrame(cdr_records)
@@ -216,3 +233,10 @@ def inspect_verbose(df):
 
 def inspect_summary(df):
     print(f"Provided DataFrame contains {len(df)} records")
+
+def to_list(x): #AI generated to handle lists in the values of dictionaries, helps with the logic in the relationships step
+    if isinstance(x, (list, tuple, set, pd.Series)):
+        return list(x)           
+    if pd.isna(x):
+        return []
+    return [x]
