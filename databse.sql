@@ -64,4 +64,3 @@ CREATE INDEX idx_binding_by_antigen
   ON antigen_antibody_binding (antigen_id);
 
 COMMIT;
-

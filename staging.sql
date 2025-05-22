@@ -67,3 +67,18 @@ CREATE TABLE staging_cdr (
   );
 
 ALTER TABLE staging_cdr ALTER COLUMN cdr_is_incomplete TYPE BOOLEAN USING (cdr_is_incomplete = 1);
+
+CREATE TABLE relationships_staging (
+  antigen_computed_id  INT,
+  cdr_computed_id      INT
+);
+
+\copy relationships_staging
+  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/relationships_20250522_125947.csv'
+  WITH (
+    FORMAT csv,
+    HEADER,
+    NULL ''            
+  );
+
+  
