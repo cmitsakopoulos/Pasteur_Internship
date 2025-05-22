@@ -1,72 +1,65 @@
-DROP TABLE IF EXISTS cdr3_chemical;
+BEGIN;
 DROP TABLE IF EXISTS cdr3_primary;
 DROP TABLE IF EXISTS cdr3_central;
 DROP TABLE IF EXISTS antigen_central;
+DROP TABLE IF EXISTS antigen_primary;
+DROP TABLE IF EXISTS antigen_antibody_binding;
 
 CREATE TABLE antigen_central (
-    antigen_id          VARCHAR(12)      PRIMARY KEY, 
+    antigen_id          INT      PRIMARY KEY, 
     name                TEXT,
     species             TEXT,
     method              TEXT,
     taxonomy_id         INT,
-    resolution_angstrom NUMERIC(5,2),
+    resolution_angstrom DOUBLE PRECISION,
     last_update         TIMESTAMPTZ
 );
 
 CREATE TABLE antigen_primary (
-    antigen_id VARCHAR(12) PRIMARY KEY,
+    antigen_id INT PRIMARY KEY,
     sequence   TEXT,
+    isoelectric             DOUBLE PRECISION,
+    gravy            DOUBLE PRECISION,
+    net_charge_normal       DOUBLE PRECISION,
+    net_charge_inflammation DOUBLE PRECISION,
     CONSTRAINT fk_antigen_primary_to_central
       FOREIGN KEY (antigen_id)
       REFERENCES antigen_central(antigen_id)
 );
-CREATE INDEX idx_antigen_primary_antigen_id
-  ON antigen_primary (antigen_id);
-
-CREATE TABLE antigen_chemical (
-    antigen_id              VARCHAR(12) PRIMARY KEY,
-    isoelectric             NUMERIC(6,4),
-    gravy_score             NUMERIC(6,4),
-    net_charge_normal       NUMERIC(6,4),
-    net_charge_inflammation NUMERIC(6,4),
-    CONSTRAINT fk_antigen_chemical_to_central
-      FOREIGN KEY (antigen_id)
-      REFERENCES antigen_central(antigen_id)
-);
-CREATE INDEX idx_antigen_chemical_antigen_id
-  ON antigen_chemical (antigen_id);
+CREATE INDEX index_antigen_with_cdr3
+  ON antigen_primary (antigen_id); --Indexing should help with lookup speed especially when automating look up commands for training an AI model....but might need to remove if overhead is too much; if too much ram usage/space usage
 
 CREATE TABLE cdr3_central (
-    cdr3_id             VARCHAR(4)    PRIMARY KEY,
-    antigen_id          VARCHAR(12)   NOT NULL
-      REFERENCES antigen_central(antigen_id),
+    cdr3_id             INT    PRIMARY KEY,
     method              TEXT,
-    resolution_angstrom NUMERIC(5,2),
+    resolution_angstrom DOUBLE PRECISION,
     species             TEXT,
     taxonomy_id         INT,
-    last_update         TIMESTAMPTZ,
-    CONSTRAINT fk_cdr3_central_to_antigen
-      FOREIGN KEY (antigen_id)
-      REFERENCES antigen_central(antigen_id)
-);
-CREATE INDEX idx_cdr3_central_antigen_id
+    last_update         TIMESTAMPTZ);
+CREATE INDEX index_cdr3_with_antigen
   ON cdr3_central (antigen_id);
 
 CREATE TABLE cdr3_primary (
-    cdr3_id     VARCHAR(4) PRIMARY KEY,
+    cdr3_id     INT PRIMARY KEY,
     sequence    TEXT,
+    gravy              DOUBLE PRECISION,
+    isoelectric        DOUBLE PRECISION,
+    net_charge_normal  DOUBLE PRECISION,
+    net_charge_inflamed DOUBLE PRECISION,
     CONSTRAINT fk_cdr3_primary_to_central
       FOREIGN KEY (cdr3_id)
       REFERENCES cdr3_central(cdr3_id)
 );
 
-CREATE TABLE cdr3_chemical (
-    cdr3_id            VARCHAR(4)   PRIMARY KEY,
-    gravy              NUMERIC(6,4),
-    isoelectric        NUMERIC(6,4),
-    net_charge_normal  NUMERIC(6,4),
-    net_charge_inflamed NUMERIC(6,4),
-    CONSTRAINT fk_cdr3_chemical_to_central
-      FOREIGN KEY (cdr3_id)
-      REFERENCES cdr3_central(cdr3_id)
+CREATE TABLE antigen_antibody_binding (
+  cdr3_id INT,
+  antigen_id INT,
+  PRIMARY KEY (cdr3_id, antigen_id),
+  FOREIGN KEY (cdr3_id) REFERENCES cdr3_central(cdr3_id),
+  FOREIGN KEY (antigen_id) REFERENCES antigen_central(antigen_id)
 );
+
+CREATE INDEX idx_binding_by_antigen 
+  ON antigen_antibody_binding (antigen_id);
+
+COMMIT;
