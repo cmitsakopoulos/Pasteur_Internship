@@ -7,7 +7,6 @@ DROP TABLE IF EXISTS cdr3_central;
 
 CREATE TABLE antigen_central (
     antigen_id          INT, 
-    name                TEXT,
     organism_name         TEXT,
     host_organism         TEXT,
     method              TEXT,

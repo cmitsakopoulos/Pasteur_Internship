@@ -1,35 +1,4 @@
--- MAKE STAGING TABLE FOR ANTIGENS
-CREATE TABLE staging_antigen (
-  antigen_seq                   TEXT,
-  database_origin               TEXT,
-  antigen_organism_name         TEXT,
-  antigen_host_organism         TEXT,
-  antigen_taxonomy_id           TEXT,
-  resolution                    DOUBLE PRECISION,
-  method                        TEXT,
-  last_update                   TIMESTAMPTZ,
-  corresponding_pdb_antibody    TEXT,      
-  antigen_gravy                 DOUBLE PRECISION,
-  antigen_pI                    DOUBLE PRECISION,
-  antigen_net_charge_inflamed   DOUBLE PRECISION,
-  antigen_net_charge_normal     DOUBLE PRECISION,
-  antigen_is_incomplete         FLOAT,
-  antigen_computed_id           INT
-);
-
--- COMMIT THE CSV INTO SQL
-\copy staging_antigen
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/antigen_20250522_125947.csv'
-  WITH (
-    FORMAT csv,
-    HEADER,
-    NULL ''            
-  );
-
---Because of how I set up the int as a boolean flag within the pipeline, we will have to stick with this method
-ALTER TABLE staging_antigen
-  ALTER COLUMN antigen_is_incomplete TYPE BOOLEAN
-  USING (antigen_is_incomplete = 1);
+- STAGING TABLES
 
 CREATE TABLE staging_cdr (
   h3_chain                      TEXT,
@@ -58,6 +27,43 @@ CREATE TABLE staging_cdr (
   cdr_computed_id               INT
 );
 
+CREATE TABLE staging_antigen (
+  antigen_seq                   TEXT,
+  database_origin               TEXT,
+  antigen_organism_name         TEXT,
+  antigen_host_organism         TEXT,
+  antigen_taxonomy_id           TEXT,
+  resolution                    DOUBLE PRECISION,
+  method                        TEXT,
+  last_update                   TIMESTAMPTZ,
+  corresponding_pdb_antibody    TEXT,      
+  antigen_gravy                 DOUBLE PRECISION,
+  antigen_pI                    DOUBLE PRECISION,
+  antigen_net_charge_inflamed   DOUBLE PRECISION,
+  antigen_net_charge_normal     DOUBLE PRECISION,
+  antigen_is_incomplete         FLOAT,
+  antigen_computed_id           INT
+);
+
+CREATE TABLE relationships_staging (
+  antigen_computed_id  INT,
+  cdr_computed_id      INT
+);
+
+-- COMMIT THE CSV INTO SQL
+\copy staging_antigen
+  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/antigen_20250522_125947.csv'
+  WITH (
+    FORMAT csv,
+    HEADER,
+    NULL ''            
+  );
+
+--Because of how I set up the int as a boolean flag within the pipeline, we will have to stick with this method
+ALTER TABLE staging_antigen
+  ALTER COLUMN antigen_is_incomplete TYPE BOOLEAN
+  USING (antigen_is_incomplete = 1);
+
 \copy staging_cdr
   FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/cdr_20250522_125947.csv'
   WITH (
@@ -66,12 +72,7 @@ CREATE TABLE staging_cdr (
     NULL ''            
   );
 
-ALTER TABLE staging_cdr ALTER COLUMN cdr_is_incomplete TYPE BOOLEAN USING (cdr_is_incomplete = 1);
-
-CREATE TABLE relationships_staging (
-  antigen_computed_id  INT,
-  cdr_computed_id      INT
-);
+ALTER TABLE staging_cdr ALTER COLUMN h3_is_incomplete TYPE BOOLEAN USING (h3_is_incomplete = 1);
 
 \copy relationships_staging
   FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/relationships_20250522_125947.csv'
@@ -84,17 +85,18 @@ CREATE TABLE relationships_staging (
 BEGIN;
 
 INSERT INTO antigen_central (
-  antigen_id, name, species, method,
-  taxonomy_id, database_origin, resolution_angstrom, last_update
-)
+    antigen_id, 
+    organism_name,
+    host_organism,
+    method,
+    taxonomy_id,
+    database_origin,
+    corresponding_pdb_antibody, 
+    is_incomplete,
+    resolution_angstrom,
+    last_update)
 SELECT
-  antigen_computed_id,            -- staging → central PK
-  database_origin,                -- or antigen_organism_name?
-  antigen_organism_name,
-  method,
-  antigen_taxonomy_id,
-  resolution,
-  last_update
+antigen_computed_id, antigen_organism_name, antigen_host_organism, method, antigen_taxonomy_id, database_origin, 
 FROM staging_antigen
 ON CONFLICT (antigen_id) DO NOTHING;  -- if you want idempotence
 
