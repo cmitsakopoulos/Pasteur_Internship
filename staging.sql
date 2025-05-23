@@ -81,4 +81,37 @@ CREATE TABLE relationships_staging (
     NULL ''            
   );
 
-  
+BEGIN;
+
+INSERT INTO antigen_central (
+  antigen_id, name, species, method,
+  taxonomy_id, database_origin, resolution_angstrom, last_update
+)
+SELECT
+  antigen_computed_id,            -- staging → central PK
+  database_origin,                -- or antigen_organism_name?
+  antigen_organism_name,
+  method,
+  antigen_taxonomy_id,
+  resolution,
+  last_update
+FROM staging_antigen
+ON CONFLICT (antigen_id) DO NOTHING;  -- if you want idempotence
+
+-- 2) Load the “primary” sequence & physchem data
+INSERT INTO antigen_primary (
+  antigen_id, sequence,
+  isoelectric, gravy,
+  net_charge_normal, net_charge_inflammation
+)
+SELECT
+  antigen_computed_id,
+  antigen_seq,
+  antigen_pI,
+  antigen_gravy,
+  antigen_net_charge_normal,
+  antigen_net_charge_inflamed
+FROM staging_antigen
+ON CONFLICT (antigen_id) DO NOTHING;
+
+COMMIT;
