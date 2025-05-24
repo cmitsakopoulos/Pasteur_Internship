@@ -68,8 +68,9 @@ INSERT INTO cdr3_central (
     resolution_angstrom,
     species,
     taxonomy_id,
-    is_incomplete,
-    last_update
+    last_update,
+    h3_is_incomplete,
+    l3_is_incomplete
 )
 SELECT
     cdr_computed_id,
@@ -81,9 +82,9 @@ SELECT
     resolution                                  AS resolution_angstrom,
     NULL::text                                  AS species,        -- <-- add if available
     NULL::text                                  AS taxonomy_id,    -- <-- add if available
-    (COALESCE(h3_is_incomplete, FALSE)
-     OR COALESCE(l3_is_incomplete, FALSE))      AS is_incomplete,
-    last_update
+    last_update,
+    h3_is_incomplete,
+    l3_is_incomplete
 FROM staging_cdr
 WHERE cdr_computed_id IS NOT NULL
 ON CONFLICT (cdr3_id) DO NOTHING;
@@ -101,14 +102,14 @@ INSERT INTO cdr3_primary (
     l3_gravy,
     h3_pI,
     l3_pI,
-    h3_is_incomplete,
     h3_N_gylcosylation_sites,
     h3_O_gylcosylation_sites,
-    l3_is_incomplete,
     l3_N_gylcosylation_sites,
     l3_O_gylcosylation_sites,
-    net_charge_normal,
-    net_charge_inflamed
+    l3_net_charge_inflamed,
+    l3_net_charge_normal,
+    h3_net_charge_inflamed,
+    h3_net_charge_normal
 )
 SELECT
     cdr_computed_id,
@@ -118,14 +119,14 @@ SELECT
     l3_gravy,
     h3_pI,
     l3_pI,
-    CASE WHEN h3_is_incomplete THEN 1 ELSE 0 END::NUMERIC(6,4),
     h3_N_gylcosylation_sites,
     h3_O_gylcosylation_sites,
-    CASE WHEN l3_is_incomplete THEN 1 ELSE 0 END::NUMERIC(6,4),
     l3_N_gylcosylation_sites,
     l3_O_gylcosylation_sites,
-    h3_net_charge_normal,        -- ↔ pick the L-chain or combine if you prefer
-    h3_net_charge_inflamed
+    h3_net_charge_normal,       
+    h3_net_charge_inflamed,
+    l3_net_charge_inflamed,
+    l3_net_charge_normal
 FROM staging_cdr
 WHERE cdr_computed_id IS NOT NULL
 ON CONFLICT (cdr3_id) DO NOTHING;
