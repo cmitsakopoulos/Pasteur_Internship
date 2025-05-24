@@ -59,7 +59,6 @@ CREATE TABLE cdr3_primary (
     l3_pI        DOUBLE PRECISION,
     h3_N_gylcosylation_sites      FLOAT,
     h3_O_gylcosylation_sites      FLOAT,
-    l3_is_incomplete              FLOAT,
     l3_N_gylcosylation_sites      FLOAT,
     l3_O_gylcosylation_sites      FLOAT,
     l3_net_charge_inflamed  DOUBLE PRECISION,

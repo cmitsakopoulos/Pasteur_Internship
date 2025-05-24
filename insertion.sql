@@ -81,7 +81,7 @@ SELECT
     pdb_id,
     resolution                                  AS resolution_angstrom,
     NULL::text                                  AS species,        -- <-- add if available
-    NULL::text                                  AS taxonomy_id,    -- <-- add if available
+    NULL::text                             AS taxonomy_id,    -- <-- add if available
     last_update,
     h3_is_incomplete,
     l3_is_incomplete
