@@ -42,9 +42,10 @@ CREATE TABLE cdr3_central (
     heavy_host_organism_name      TEXT,
     pdb_id                        TEXT,
     resolution_angstrom DOUBLE PRECISION,
+    h3_is_incomplete BOOLEAN,
     species             TEXT,
     taxonomy_id         TEXT,
-    is_incomplete BOOLEAN,
+    l3_is_incomplete BOOLEAN,
     last_update         TIMESTAMPTZ,
     CONSTRAINT pk_cdr3_id_main PRIMARY KEY (cdr3_id));
 
@@ -56,14 +57,15 @@ CREATE TABLE cdr3_primary (
     l3_gravy                      DOUBLE PRECISION,
     h3_pI        DOUBLE PRECISION,
     l3_pI        DOUBLE PRECISION,
-    h3_is_incomplete              FLOAT, 
     h3_N_gylcosylation_sites      FLOAT,
     h3_O_gylcosylation_sites      FLOAT,
     l3_is_incomplete              FLOAT,
     l3_N_gylcosylation_sites      FLOAT,
     l3_O_gylcosylation_sites      FLOAT,
-    net_charge_normal  DOUBLE PRECISION,
-    net_charge_inflamed DOUBLE PRECISION,
+    l3_net_charge_inflamed  DOUBLE PRECISION,
+    l3_net_charge_normal DOUBLE PRECISION,
+    h3_net_charge_inflamed      DOUBLE PRECISION,
+    h3_net_charge_normal      DOUBLE PRECISION,
     CONSTRAINT fk_cdr3_primary_to_central
       FOREIGN KEY (cdr3_id)
       REFERENCES cdr3_central(cdr3_id) ON DELETE CASCADE
