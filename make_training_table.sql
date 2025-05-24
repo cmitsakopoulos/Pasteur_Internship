@@ -1,4 +1,5 @@
--- Making the training table is preferable as select commands wont have to be run anew to make ex. a dataframe in Python, then training a model on that. Instead, the table is ready and the only computiational step is information acquisition from a pre-computed table
+-- The idea behind merging the training table content in SQL, lies in reducing performance overhead that is required when using SQLAlchemy with pandas and having to undergo additional processing within Python, before we even get to sourcing the information we need.
+-- IMPORTANTLY: I can export the database image for you and give it to you, as I used it, minimising reproducibility complexity; obviously...
 CREATE TABLE training_dataset AS
 SELECT
   relationship.cdr3_id,
