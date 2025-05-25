@@ -212,7 +212,8 @@ class RmPurificationTags(Step):
             new_data["antigen"] = df
             print(f"RmPurificationTags → cleaned antigenic sequences in the following number of rows: {new_data['antigen'].shape[0]}")
         return new_data
-    
+
+#Remember, this step is ONLY intended for assigning unique identifiers, this is uninformative encoding, all prior information is lost dramatically; the sequence cannot possibly be discerned from the computed ID. 
 class AssignIDs(Step):
     def __init__(self): #Each class is only instantiated once as it is a componenent in the larger recipe called by the cli, so this which is normally bad practice, ill leave as it makes no difference due to being instantiated just once/just how I know how to do it...
         self.amino_acid_rubric = {
