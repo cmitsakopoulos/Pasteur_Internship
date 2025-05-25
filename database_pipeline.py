@@ -230,8 +230,10 @@ class AssignIDs(Step):
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the filtering done before didnt work; maybe we dont only have ambiguous X, maybe there are additional characters
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Replace AAs with encoding
-                    cdr_df.at[idx, "cdr_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+"))) #Sum the AA encodings
+                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Explanation: Perform a dictionary look up and replace each character from the re.compile/by reference to the dictionary, with the corresponding integer. Integers are deliminated using a plus sign...
+                    str_to_numbers = [int(x) for x in numeric_str.rstrip("+").split("+")] #Convert deliminated numeric string into a list of numbers...
+                    weighted_sum = sum([(index+1) * value for index, value in enumerate(str_to_numbers)]) #We start from +1 because python lists from 0, 1, 2...this makes the list weighted such that the resulting id must be unique...then we sum it in the same line
+                    cdr_df.at[idx, "cdr_computed_id"] = weighted_sum - len(seq) ** 2 #Sum the AA encodings #Multiply by taxonomic id...find solution...
             new_data["cdr"] = cdr_df
             print(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
         if "antigen" in data:
@@ -241,8 +243,10 @@ class AssignIDs(Step):
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the previous functions have worked correctly, I learned this the hard way, however everything should be fine now...could remove in future updates
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq)
-                    ant_df.at[idx, "antigen_computed_id"] = sum(map(int, numeric_str.rstrip("+").split("+")))
+                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Explanation: Perform a dictionary look up and replace each character from the re.compile/by reference to the dictionary, with the corresponding integer. Integers are deliminated using a plus sign...
+                    str_to_numbers = [int(x) for x in numeric_str.rstrip("+").split("+")] #Convert deliminated numeric string into a list of numbers...
+                    weighted_sum = sum([(index+1) * value for index, value in enumerate(str_to_numbers)]) #We start from +1 because python lists from 0, 1, 2...this makes the list weighted such that the resulting id must be unique...then we sum it in the same line
+                    cdr_df.at[idx, "antigen_computed_id"] = weighted_sum - len(seq) ** 2 #Sum the AA encodings #Multiply by taxonomic id...find solution...
             new_data["antigen"] = ant_df
             print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
