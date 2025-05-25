@@ -52,7 +52,7 @@ CREATE TABLE relationships_staging (
 
 -- COMMIT THE CSV INTO SQL
 \copy staging_antigen
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/antigen_20250522_125947.csv'
+  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/antigen_20250525_165025.csv'
   WITH (
     FORMAT csv,
     HEADER,
@@ -65,55 +65,19 @@ ALTER TABLE staging_antigen
   USING (antigen_is_incomplete = 1);
 
 \copy staging_cdr
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/cdr_20250522_125947.csv'
+  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/cdr_20250525_165025.csv'
   WITH (
     FORMAT csv,
     HEADER,
     NULL ''            
   );
 
-ALTER TABLE staging_cdr ALTER COLUMN h3_is_incomplete TYPE BOOLEAN USING (h3_is_incomplete = 1);
+ALTER TABLE staging_cdr ALTER COLUMN l3_is_incomplete TYPE BOOLEAN USING (l3_is_incomplete = 1);
 
 \copy relationships_staging
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/relationships_20250522_125947.csv'
+  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/relationships_20250525_165025.csv'
   WITH (
     FORMAT csv,
     HEADER,
     NULL ''            
   );
-
-BEGIN;
-
-INSERT INTO antigen_central (
-    antigen_id, 
-    organism_name,
-    host_organism,
-    method,
-    taxonomy_id,
-    database_origin,
-    corresponding_pdb_antibody, 
-    is_incomplete,
-    resolution_angstrom,
-    last_update)
-SELECT
-antigen_computed_id, antigen_organism_name, antigen_host_organism, method, antigen_taxonomy_id, database_origin, 
-FROM staging_antigen
-ON CONFLICT (antigen_id) DO NOTHING;  -- if you want idempotence
-
--- 2) Load the “primary” sequence & physchem data
-INSERT INTO antigen_primary (
-  antigen_id, sequence,
-  isoelectric, gravy,
-  net_charge_normal, net_charge_inflammation
-)
-SELECT
-  antigen_computed_id,
-  antigen_seq,
-  antigen_pI,
-  antigen_gravy,
-  antigen_net_charge_normal,
-  antigen_net_charge_inflamed
-FROM staging_antigen
-ON CONFLICT (antigen_id) DO NOTHING;
-
-COMMIT;
