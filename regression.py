@@ -11,7 +11,9 @@ import time
 from sklearn.preprocessing import OneHotEncoder, FunctionTransformer
 from sklearn.pipeline import Pipeline as SeqPipeline
 from xgboost import XGBRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.multioutput import MultiOutputRegressor
 
 
 sql_engine = create_engine("postgresql://chrismitsacopoulos:password@localhost/pasteurdb")
@@ -20,6 +22,7 @@ df = pd.read_sql_query("SELECT * FROM training_dataset", sql_engine)
 """
 Big problem-> For one hot encoding to actually work, we need to make all sequences in one column be the same length. Therefore, the split_pad function introduces X characters which are NOT in the alphabet (see amino_acids) and OneHotEncoder has been instructed to IGNORE them when creating categories and mapping out sequence features...
 """
+
 amino_acids = list("ACDEFGHIKLMNPQRSTVWY") #Ported from the pipeline...hopefully no mistakes happened there or this is completely wrong!!!
 # compute max sequence length for both antibody chains using Series.map()
 max_len = max(df["h3_chain"].map(len).max(), df["l3_chain"].map(len).max())
@@ -77,16 +80,14 @@ Y_numeric = df[["antigen_isoelectric", "antigen_gravy", "antigen_net_charge_norm
 stack_estimators = [
     ('cont_xgb', Pipeline([
         ('scale', StandardScaler()),
-        ('xgb', XGBRegressor(
-            objective='reg:squarederror',
-            n_estimators=500,
-            learning_rate=0.05,
-            max_depth=6,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
-            random_state=20
+        ('hgb', MultiOutputRegressor(
+            HistGradientBoostingRegressor(
+                max_iter=1000,
+                learning_rate=0.05,
+                max_depth=10,
+                l2_regularization=1.0,
+                random_state=42
+            )
         ))
     ])),
     ('seq_ridge', RidgeCV(
@@ -99,7 +100,7 @@ stack_estimators = [
 stack = StackingRegressor(
     estimators=stack_estimators,
     final_estimator=Ridge(),   
-    passthrough=False         
+    passthrough=True         
 )
 
 
@@ -147,4 +148,3 @@ r2_seq = cv_seq['test_r2']
 print(f"Sequence CV RMSE: {rmse_seq.mean():.3f} ± {rmse_seq.std():.3f}")
 print(f"Sequence CV R²:  {r2_seq.mean():.3f} ± {r2_seq.std():.3f}")
 print(f"Sequence CV time: {elapsed_seq:.2f}s")
-

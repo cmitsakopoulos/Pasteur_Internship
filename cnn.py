@@ -1,92 +1,65 @@
 from sqlalchemy import create_engine
-import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Flatten, Dense
-from tensorflow.keras.utils import to_categorical
 import pandas as pd
-from sklearn.model_selection import train_test_split
-import time
+import numpy as np
+from sklearn.preprocessing import OneHotEncoder, FunctionTransformer
+from sklearn.pipeline import Pipeline as SeqPipeline
 
 
 sql_engine = create_engine("postgresql://chrismitsacopoulos:password@localhost/pasteurdb")
 df = pd.read_sql_query("SELECT * FROM training_dataset", sql_engine)
 
-AA = list("ACDEFGHIKLMNPQRSTVWY-")
-mapping = {aa: idx for idx, aa in enumerate(AA)}
-# fixed lengths for H3 and L3 chains
-max_h3 = df['h3_chain'].str.len().max()
-max_l3 = df['l3_chain'].str.len().max()
-seq_len = max_h3 + max_l3
+"""
+Big problem-> For one hot encoding to actually work, we need to make all sequences in one column be the same length. Therefore, the split_pad function introduces X characters which are NOT in the alphabet (see amino_acids) and OneHotEncoder has been instructed to IGNORE them when creating categories and mapping out sequence features...
+"""
+amino_acids = list("ACDEFGHIKLMNPQRSTVWY") #Ported from the pipeline...hopefully no mistakes happened there or this is completely wrong!!!
+# compute max sequence length for both antibody chains using Series.map()
+max_len = max(df["h3_chain"].map(len).max(), df["l3_chain"].map(len).max())
 
-# pad and concatenate antibody sequences
-df['concat_pad'] = df['h3_chain'].str.ljust(max_h3, '-') + df['l3_chain'].str.ljust(max_l3, '-')
-# convert to index arrays and one-hot encode
-seq_indices = np.array([[mapping[aa] for aa in seq] for seq in df['concat_pad']])
-X_seq = to_categorical(seq_indices, num_classes=len(AA))
+antigen_max_len = df["antigen_sequence"].str.len().max()
 
-# numeric antibody features
-X_num = df[
-    [
-      "h3_gravy", "l3_gravy", "h3_pi", "l3_pi",
-      "h3_n_gylcosylation_sites", "h3_o_gylcosylation_sites",
-      "l3_n_gylcosylation_sites", "l3_o_gylcosylation_sites",
-      "l3_net_charge_inflamed", "l3_net_charge_normal",
-      "h3_net_charge_inflamed", "h3_net_charge_normal"
-    ]
-].values
+# generic split-and-pad factory
+def split_pad_factory(length):
+    def split_pad(seqs):
+        seqs_arr = np.array(seqs).ravel()
+        return [list(seq.ljust(length, "X")[:length]) for seq in seqs_arr]
+    return split_pad
 
-# --- One-hot encoding for antigen sequence targets and numeric targets ---
-# pad antigen sequences
-max_ag = df['antigen_sequence'].str.len().max()
-df['ag_pad'] = df['antigen_sequence'].str.ljust(max_ag, '-')
-# convert to index arrays and one-hot encode
-ag_indices = np.array([[mapping[aa] for aa in seq] for seq in df['ag_pad']])
-Y_seq = to_categorical(ag_indices, num_classes=len(AA))
-# numeric antigen targets
-Y_num = df[
-    [
-      "antigen_isoelectric", "antigen_gravy",
-      "antigen_net_charge_normal", "antigen_net_charge_inflamed"
-    ]
-].values
+#Sklearn gives us the ability to make a pipeline to do the encoding steps for us, this is it for X sequence variables...
 
-# Split into training and hold-out test sets for both inputs and outputs
-X_seq_train, X_seq_test, X_num_train, X_num_test, Y_seq_train, Y_seq_test, Y_num_train, Y_num_test = train_test_split(
-    X_seq, X_num, Y_seq, Y_num, test_size=0.1, random_state=42
-)
-
-# --- Prepare inputs for a basic MLP ---
-# Example: flatten sequence one-hot and concatenate with numeric features
-X_train = np.concatenate([
-    X_seq_train.reshape((X_seq_train.shape[0], -1)),
-    X_num_train
-], axis=1)
-X_test = np.concatenate([
-    X_seq_test.reshape((X_seq_test.shape[0], -1)),
-    X_num_test
-], axis=1)
-
-# For demonstration, we'll train on numeric antigen targets
-y_train = Y_num_train
-y_test = Y_num_test
-
-# --- Build a simple feedforward network ---
-model = Sequential([
-    Flatten(input_shape=(X_train.shape[1],)),
-    Dense(64, activation='relu'),
-    Dense(64, activation='relu'),
-    Dense(y_train.shape[1], activation='linear')
+antibody_encoder = SeqPipeline([
+    ("split", FunctionTransformer(split_pad_factory(max_len), validate=False)),
+    ("onehot", OneHotEncoder(
+        categories=[amino_acids] * max_len,
+        handle_unknown="ignore", #This will ignore the added/padding X characters
+        sparse_output=False
+    ))
 ])
 
-model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+#Re introduce the encoded sequences back into the dataframe
+antibody_encoder.fit(df[["h3_chain", "l3_chain"]])
+X_h3 = antibody_encoder.transform(df[["h3_chain"]])
+#X_l3 = antibody_encoder.transform(df[["l3_chain"]])
+#X_seq = np.hstack([X_h3, X_l3])
 
-# --- Train and evaluate ---
-history = model.fit(
-    X_train, y_train,
-    validation_data=(X_test, y_test),
-    epochs=10,
-    batch_size=32
-)
+antigen_encoder = SeqPipeline([
+    ("split", FunctionTransformer(split_pad_factory(antigen_max_len), validate=False)),
+    ("onehot", OneHotEncoder(
+        categories=[amino_acids] * antigen_max_len,
+        handle_unknown="ignore",
+        sparse_output=False
+    ))
+])
 
-loss, mae = model.evaluate(X_test, y_test)
-print(f"Test loss: {loss:.4f}, Test MAE: {mae:.4f}")
+antigen_encoder.fit(df[["antigen_sequence"]])
+Y_seq = antigen_encoder.transform(df[["antigen_sequence"]])
+
+#    "l3_n_gylcosylation_sites", "l3_o_gylcosylation_sites",
+#   "l3_net_charge_inflamed", "l3_net_charge_normal",
+#  "l3_gravy", "l3_pi",
+X_numeric = df[[
+    "h3_gravy", "h3_pi",
+    "h3_n_gylcosylation_sites", "h3_o_gylcosylation_sites",
+    "h3_net_charge_inflamed", "h3_net_charge_normal"
+]].values
+
+Y_numeric = df[["antigen_isoelectric", "antigen_gravy", "antigen_net_charge_normal", "antigen_net_charge_inflamed"]]
