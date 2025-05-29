@@ -14,6 +14,7 @@ def extractor(filepath):
         print(f"Error: file not found: {filepath}", file=sys.stderr)
         sys.exit(1)
     else:
+        flag = False #This will help us track if the csv is from my own application or from foreign source
         records = []
         with open(filepath, newline='', encoding='utf-8') as f:
             reader = csv.reader(
@@ -30,9 +31,16 @@ def extractor(filepath):
                 sys.exit(1)
             expected = ["json", "pdb_id", "heavy", "light", "antigen", "cl_id"]
             if headers != expected:
-                print("NORMAL csv type, reverting to standard CSV read.", file=sys.stderr)
-                non_idiosyncratic_csv = pd.read_csv(filepath)
-                return  non_idiosyncratic_csv#If its not idiosyncratic
+                if "antigen_computed_id" in headers or "cdr_computed_id" in headers: #Check if the file comes from the pipeline or not
+                    internal_csv = pd.read_csv(filepath)
+                    flag = True
+                    return internal_csv, flag
+                else:
+                    if "relationships" in headers: #yes there are better ways to do this but my filetypes have like 20-30 columns, this isnt the problem it seems to be
+                        return print(f"Skipping the following pipeline produced file: {filepath}")
+                    print("NORMAL csv type, reverting to standard CSV read.", file=sys.stderr)
+                    non_idiosyncratic_csv = pd.read_csv(filepath)
+                    return  non_idiosyncratic_csv, flag#If its not idiosyncratic
             for lineno, row in enumerate(reader, start=2):
                 if len(row) != 6:
                     print(f"Line {lineno}: expected 6 columns, got {len(row)}", file=sys.stderr)
@@ -51,7 +59,7 @@ def extractor(filepath):
                     "cl_id": cl_id
                 })
                 records.append(parsed)
-    return pd.DataFrame(records) #self explanatory
+    return pd.DataFrame(records), flag #self explanatory
 
 def parser(df):
     cdr_records = []

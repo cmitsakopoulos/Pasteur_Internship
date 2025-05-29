@@ -38,6 +38,8 @@ class Step(ABC): #Parent class to be method overrriden by specialised children
 
 class Concatenation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        if "pipeline_flag" in data:
+            return data
         cdr_frames = []
         antigen_frames = []
         for key, df in data.items():
@@ -77,6 +79,8 @@ class Write(Step):
 #CHEMICAL CHARACTERISTICS
 class CDRComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        if "pipeline_flag" in data:
+            return data
         new_data: Dict[str, pd.DataFrame] = data.copy() #Copy entire thing then mutate
         #Catch the antigen dataframes, remember that Walker will name the files antigen_csv or cdr_csv something
         if 'cdr' in new_data:
@@ -89,7 +93,9 @@ class CDRComputation(Step):
 
 class AntigenComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = data.copy() 
+        if "pipeline_flag" in data:
+            return data     
+        new_data: Dict[str, pd.DataFrame] = data.copy()   
         if 'antigen' in data:
             computation_antigen_df = new_data["antigen"]
             calculate_antigen_chars(computation_antigen_df)
@@ -102,6 +108,8 @@ class AntigenComputation(Step):
 # Multiple antibodies can bind to a single antigen, many antigens can sature a single antibody, this is reflected in the source data too...
 class FlattenDuplicates(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        if "pipeline_flag" in data:
+            return data
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
             cdr_df = data['cdr'].copy()
@@ -156,9 +164,14 @@ class Walker(Step):
     @staticmethod
     def _process_file(args):
         filepath, idx = args
-        df_raw = extractor(filepath)
-        antigen_df, cdr_df = parser(df_raw)
-        return filepath, idx, antigen_df, cdr_df
+        df_raw, flag = extractor(filepath)
+        if flag == True:
+            antigen_df = df_raw #Placeholder name literally, this is just a patch and wont affect performance
+            cdr_df = "meow" #Make a dummy entry into the return clause so it doesnt break the previous code which WORKS
+            return filepath, idx, antigen_df, cdr_df, flag
+        else:
+            antigen_df, cdr_df = parser(df_raw)
+            return filepath, idx, antigen_df, cdr_df, flag
 
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
@@ -172,15 +185,30 @@ class Walker(Step):
                 filepath = os.path.join(root, fname)
                 tasks.append((filepath, count))
         with ProcessPoolExecutor(max_workers=2) as executor:
-            for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
-                base_key = f"csv{idx}"
-                new_data[f"antigen_{base_key}"] = antigen_df
-                new_data[f"cdr_{base_key}"]      = cdr_df
-                print(
-                    f"Walker → processed {filepath!r}: "
-                    f"antigen rows={antigen_df.shape[0]}, "
-                    f"cdr rows={cdr_df.shape[0]}"
-                )
+            for filepath, idx, antigen_df, cdr_df, flag in executor.map(self._process_file, tasks):
+                if not flag:
+                    base_key = f"csv{idx}" #Keep the dfs in the dict unique, so that we dont start accidentally overwriting them....
+                    new_data[f"antigen_{base_key}"] = antigen_df
+                    new_data[f"cdr_{base_key}"]      = cdr_df
+                    #we do not store the flag such that all processes will just check if the flag exists as a dict key, if not proceed normally
+                    print(
+                        f"Walker → processed {filepath!r}: "
+                        f"antigen rows={antigen_df.shape[0]}, "
+                        f"cdr rows={cdr_df.shape[0]}"
+                    )
+                else:
+                    new_data["pipeline_flag"] = True #Add the flag into the traded dictionary...a boolean classifier seems easier to trade than a string, massive computational savings of 0s...:)
+                    if "antigen" in antigen_df.columns:
+                        new_data["antigen"] = antigen_df
+                        print(
+                        "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
+                        f"Walker → processed {filepath!r}: "
+                    )
+                    elif "cdr" in antigen_df.columns:
+                        new_data["cdr"] = antigen_df
+                        print(
+                        "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
+                        f"Walker → processed {filepath!r}: ")
         return new_data
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
@@ -202,6 +230,8 @@ class RmPurificationTags(Step):
             rf'(?:{self.alteration}(?:[A-Z]{{1,{self.max_gap}}}{self.alteration})*)'
         ) #create a rubric for the purging to occur later
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        if "pipeline_flag" in data:
+            return data
         new_data: Dict[str, pd.DataFrame] = {}
         if "cdr" in data: # pass cdr through unchanged
             new_data["cdr"] = data["cdr"].copy()
@@ -223,6 +253,8 @@ class AssignIDs(Step):
         'S':16,  'T':17,  'V':18,  'W':19,  'Y':20,}
         self.re_pattern = re.compile(r'[ACDEFGHIKLMNPQRSTVWY]')
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        if "pipeline_flag" in data:
+            return data
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
             cdr_df = data["cdr"].copy()
