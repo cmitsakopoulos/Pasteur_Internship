@@ -261,28 +261,22 @@ class ComputeRelationships(Step):
         new_data: Dict[str, pd.DataFrame] = {}
         antigens = data["antigen"].copy()
         cdrs = data["cdr"].copy()
-        antigen_dict = {}
-        cdr_dict = {}
-        #Populate antigne  dict
-        for idx, content in antigens.iterrows():
-            antigen_dict[idx] = antigens.at[idx, "corresponding_pdb_antibody"]
-        #Populate the cdr dict
-        for idx,  content in cdrs.iterrows():
-            cdr_dict[idx] = cdrs.at[idx, "pdb_id"]
-        pdb_to_cdr = defaultdict(list) #KeyErrors dont fail the code returning an empty list instead...important for missing pdb/antigenid values...
-        for idx, row in cdrs.iterrows():          
-            for pdb in to_list(row["pdb_id"]): #convert to list using AI code ;)
-                pdb_to_cdr[pdb].append(row["cdr_computed_id"])
-        pairs = []
-        for idx, ag in antigens.iterrows():       
-            for pdb in to_list(ag["corresponding_pdb_antibody"]):
-                for cdr_id in pdb_to_cdr.get(pdb, ()):
-                    pairs.append({
-                        "antigen_computed_id": ag["antigen_computed_id"],
-                        "cdr_computed_id": cdr_id
-                    })
-        pairs = pd.DataFrame(pairs)
-        new_data["antigen"] = antigens
-        new_data["cdr"] = cdrs
+        antigens["pdb_list"] = antigens["corresponding_pdb_antibody"].apply(to_list)
+        cdrs["pdb_list"]     = cdrs["pdb_id"].apply(to_list)
+        ag_exp  = antigens.explode("pdb_list")[["antigen_computed_id", "pdb_list"]]
+        cdr_exp = cdrs.explode("pdb_list")[["cdr_computed_id",     "pdb_list"]]
+        #Instead of the iterative search for matches, I preferred to now leverage the pandas inbuilt C-based hash join (as it is described online)
+        pairs = (
+            pd.merge(ag_exp, cdr_exp, on="pdb_list", how="inner")
+              [["antigen_computed_id", "cdr_computed_id"]]
+              .drop_duplicates()
+              .reset_index(drop=True)
+        )
+        # Assign outputs, dropping helper column
+        new_data["antigen"]       = antigens.drop(columns=["pdb_list"])
+        new_data["cdr"]           = cdrs.drop(columns=["pdb_list"])
         new_data["relationships"] = pairs
         return new_data
+    
+class AddMoreFeatures(Step):
+    pass
