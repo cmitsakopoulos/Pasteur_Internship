@@ -74,8 +74,12 @@ X_numeric = df[[
     "h3_net_charge_inflamed", "h3_net_charge_normal"
 ]].values
 
-Y_numeric = df[["antigen_isoelectric", "antigen_gravy", "antigen_net_charge_normal", "antigen_net_charge_inflamed"]]
+x_scaler = StandardScaler()
+X_numeric =x_scaler.fit_transform(X_numeric)
 
+Y_numeric = df[["antigen_isoelectric", "antigen_gravy", "antigen_net_charge_normal", "antigen_net_charge_inflamed"]]
+y_scaler = StandardScaler()
+Y_numeric = y_scaler.fit_transform(Y_numeric)
 
 stack_estimators = [
     ('cont_xgb', Pipeline([
