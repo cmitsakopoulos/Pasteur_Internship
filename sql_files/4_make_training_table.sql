@@ -1,7 +1,5 @@
--- The idea behind merging the training table content in SQL, lies in reducing performance overhead that is required when using SQLAlchemy with pandas and having to undergo additional processing within Python, before we even get to sourcing the information we need.
--- IMPORTANTLY: I can export the database image for you and give it to you, as I used it, minimising reproducibility complexity; obviously...https://snapshooter.com/learn/import-export-postgresql-database
 BEGIN;
-DROP TABLE training_dataset IF EXISTS;
+DROP TABLE IF EXISTS training_dataset;
 CREATE TABLE training_dataset AS
 SELECT
   relationship.cdr3_id,

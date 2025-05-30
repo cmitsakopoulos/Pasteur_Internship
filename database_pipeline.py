@@ -10,6 +10,7 @@ import pandas as pd
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
 
 
 
@@ -204,14 +205,19 @@ class Walker(Step):
                 else:
                     repeat_headers_sanity_check =  set(antigen_df.columns)
                     new_data["pipeline_flag"] = True #Add the flag into the traded dictionary...a boolean classifier seems easier to trade than a string, massive computational savings of 0s...:)
-                    if "antigen_computed_id" in repeat_headers_sanity_check:
+                    if "antigen_seq" in repeat_headers_sanity_check:
                         new_data["antigen"] = antigen_df
                         print(
                         "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
                         f"Walker → processed {filepath!r}: "
                     )
-                    elif "cdr_computed_id" in repeat_headers_sanity_check:
+                    elif "h3_chain" in repeat_headers_sanity_check:
                         new_data["cdr"] = antigen_df
+                        print(
+                        "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
+                        f"Walker → processed {filepath!r}: ")
+                    elif "cdr_computed_id" in repeat_headers_sanity_check and "antigen_computed_id" in repeat_headers_sanity_check: #if both exist then the dataframe is that of relationships
+                        new_data["relationships"] = antigen_df
                         print(
                         "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
                         f"Walker → processed {filepath!r}: ")
@@ -296,6 +302,8 @@ class AssignIDs(Step):
 #Algorithmic complexity is therefore higher than pandas but whatever...preliminary trials showed that to parse throuh the entire NAStructuralDB deduplicated dataset and find 679 relationships, it takes 5 seconds on M1 Macintosh without connection to power supply!
 class ComputeRelationships(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        if "relationships" in data: #Check in case the flag system fails for some odd reason?! Dont repeat computations
+            return data
         new_data: Dict[str, pd.DataFrame] = {}
         antigens = data["antigen"].copy()
         cdrs = data["cdr"].copy()
@@ -328,56 +336,53 @@ class WorkWithDatabase(Step):
         if not ddl_paths:
             raise RuntimeError(f"No DDL files found in {self.ddl_dir}")
 
-        engine = create_engine(self.connection_string)
+        engine = create_engine(self.connection_string, echo=True)
         with engine.begin() as conn:
-            first = ddl_paths[0]
+            first = ddl_paths[0] #catch the staging DDL...
             print(f"WorkWithDatabase → creating staging tables from {first.name}")
             for stmt in first.read_text(encoding="utf-8").split(";"):
                 stmt = stmt.strip()
                 if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
-                    conn.execute(stmt)
+                    conn.execute(text(stmt))
 
             print("WorkWithDatabase → inserting DataFrames into staging tables...")
-            for key, df in data.items():
-                # skip non-DataFrame entries (e.g. pipeline_flag)
-                if not isinstance(df, pd.DataFrame):
+            for dict_key, dict_df in data.items():
+                # skip non-DataFrame entries (e.g. pipeline_flag), aka dont try to enter the flag as a staging table
+                if not isinstance(dict_df, pd.DataFrame):
                     continue
-                stg_table = f"staging_{key}"
-                if not df.empty:
-                    print(f" • loading {len(df)} rows into {stg_table}")
-                    df.to_sql(stg_table, conn, if_exists="append", index=False)
+                if not dict_df.empty:
+                    stg_table = f"staging_{dict_key}"
+                    print(f" • loading {len(dict_df)} rows into {stg_table}")
+                    dict_df.to_sql(stg_table, conn, if_exists="append", index=False)
 
-            # Phase 2b: alter staging_antigen column to BOOLEAN
+            # Alter the is_incomplete columns into easily readeable boolean values instead of floating point 1.0 or 0.0 as booleans
             print("WorkWithDatabase → altering staging_antigen.antigen_is_incomplete to BOOLEAN...")
-            conn.execute(
-                """
+            conn.execute(text(      """
                 ALTER TABLE staging_antigen
                   ALTER COLUMN antigen_is_incomplete TYPE BOOLEAN
                   USING (antigen_is_incomplete = 1);
-                """
+                """)
             )
             print("WorkWithDatabase → altering staging_cdr.h3_is_incomplete to BOOLEAN...")
-            conn.execute(
-                """
+            conn.execute(text(         """
                 ALTER TABLE staging_cdr
                   ALTER COLUMN h3_is_incomplete TYPE BOOLEAN
                   USING (h3_is_incomplete = 1);
-                """
+                """)
             )
             print("WorkWithDatabase → altering staging_cdr.l3_is_incomplete to BOOLEAN...")
-            conn.execute(
-                """
+            conn.execute(text( """
                 ALTER TABLE staging_cdr
                   ALTER COLUMN l3_is_incomplete TYPE BOOLEAN
                   USING (l3_is_incomplete = 1);
-                """
+                """)
             )
-            for ddl_path in ddl_paths[1:]:
+            for ddl_path in ddl_paths[1:]: #Continue after staging tables have been built, then populated and modified; see above 
                 print(f"WorkWithDatabase → applying post-load DDL {ddl_path.name}")
                 for stmt in ddl_path.read_text(encoding="utf-8").split(";"):
                     stmt = stmt.strip()
                     if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
-                        conn.execute(stmt)
+                        conn.execute(text(stmt))
 
         print("WorkWithDatabase → all DDL applied and data loaded.")
         return data

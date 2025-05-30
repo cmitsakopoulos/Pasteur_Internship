@@ -32,7 +32,7 @@ CREATE TABLE antigen_primary (
 );
 
 CREATE INDEX index_antigen_with_cdr3
-  ON antigen_primary (antigen_id); --Indexing should help with lookup speed especially when automating look up commands for training an AI model....but might need to remove if overhead is too much; if too much ram usage/space usage
+  ON antigen_primary (antigen_id); 
 
 CREATE TABLE cdr3_central (
     cdr3_id             INT,
@@ -55,12 +55,12 @@ CREATE TABLE cdr3_primary (
     l3_chain    TEXT,
     h3_gravy              DOUBLE PRECISION,
     l3_gravy                      DOUBLE PRECISION,
-    h3_pI        DOUBLE PRECISION,
-    l3_pI        DOUBLE PRECISION,
-    h3_N_gylcosylation_sites      FLOAT,
-    h3_O_gylcosylation_sites      FLOAT,
-    l3_N_gylcosylation_sites      FLOAT,
-    l3_O_gylcosylation_sites      FLOAT,
+    h3_pi        DOUBLE PRECISION,
+    l3_pi        DOUBLE PRECISION,
+    h3_n_gylcosylation_sites      FLOAT,
+    h3_o_gylcosylation_sites      FLOAT,
+    l3_n_gylcosylation_sites      FLOAT,
+    l3_o_gylcosylation_sites      FLOAT,
     l3_net_charge_inflamed  DOUBLE PRECISION,
     l3_net_charge_normal DOUBLE PRECISION,
     h3_net_charge_inflamed      DOUBLE PRECISION,

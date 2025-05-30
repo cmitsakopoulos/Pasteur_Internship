@@ -31,13 +31,12 @@ def extractor(filepath):
                 sys.exit(1)
             expected = ["json", "pdb_id", "heavy", "light", "antigen", "cl_id"]
             if headers != expected:
-                if "antigen_computed_id" in headers or "cdr_computed_id" in headers: #Check if the file comes from the pipeline or not
+               if any(col in headers for col in ("antigen_computed_id", "cdr_computed_id", "relationships")): #Check if the file comes from the pipeline or not
                     internal_csv = pd.read_csv(filepath)
                     flag = True
                     return internal_csv, flag
-                else:
-                    if "relationships" in headers: #yes there are better ways to do this but my filetypes have like 20-30 columns, this isnt the problem it seems to be
-                        return print(f"Skipping the following pipeline produced file: {filepath}")
+               else:
+                #If the csv file is normal but NOT from my pipeline
                     print("NORMAL csv type, reverting to standard CSV read.", file=sys.stderr)
                     non_idiosyncratic_csv = pd.read_csv(filepath)
                     return  non_idiosyncratic_csv, flag#If its not idiosyncratic
@@ -127,7 +126,7 @@ def parser(df):
 
 def calculate_cdr_chars(df):
     #Check for pre-existing columns
-    for col in ['h3_gravy', 'h3_pI', 'h3_net_charge_inflamed', 'h3_net_charge_normal', 'l3_gravy', 'l3_pI', 'l3_net_charge_inflamed',  'l3_net_charge_normal']:
+    for col in ['h3_gravy', 'h3_pi', 'h3_net_charge_inflamed', 'h3_net_charge_normal', 'l3_gravy', 'l3_pi', 'l3_net_charge_inflamed',  'l3_net_charge_normal']:
         df[col] = float('nan')
 
     for idx, row in df.iterrows():
@@ -147,7 +146,7 @@ def calculate_cdr_chars(df):
                 df.at[idx, 'h3_gravy'] = float(f"{val:.5g}")
 
                 val = agn_3.isoelectric_point()
-                df.at[idx, 'h3_pI'] = float(f"{val:.5g}")
+                df.at[idx, 'h3_pi'] = float(f"{val:.5g}")
 
                 val = agn_3.charge_at_pH(7.35)
                 df.at[idx, 'h3_net_charge_normal'] = float(f"{val:.5g}")
@@ -155,8 +154,8 @@ def calculate_cdr_chars(df):
                 val = agn_3.charge_at_pH(5.5)
                 df.at[idx, 'h3_net_charge_inflamed'] = float(f"{val:.5g}")
                 df.at[idx, 'h3_is_incomplete']       = is_incomplete_3
-                df.at[idx, "h3_N_gylcosylation_sites"] = find_N_glycosilation(h3_seq)
-                df.at[idx, "h3_O_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
+                df.at[idx, "h3_n_gylcosylation_sites"] = find_N_glycosilation(h3_seq)
+                df.at[idx, "h3_o_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
                 df.at[idx, "h3_chain"] = clean_seq_h3
 
         # Light chain CDR3
@@ -175,7 +174,7 @@ def calculate_cdr_chars(df):
                 df.at[idx, 'l3_gravy'] = float(f"{val:.5g}")
 
                 val = agn_2.isoelectric_point()
-                df.at[idx, 'l3_pI'] = float(f"{val:.5g}")
+                df.at[idx, 'l3_pi'] = float(f"{val:.5g}")
 
                 val = agn_2.charge_at_pH(7.35)
                 df.at[idx, 'l3_net_charge_normal'] = float(f"{val:.5g}")
@@ -183,8 +182,8 @@ def calculate_cdr_chars(df):
                 val = agn_2.charge_at_pH(5.5)
                 df.at[idx, 'l3_net_charge_inflamed'] = float(f"{val:.5g}")
                 df.at[idx, 'l3_is_incomplete']       = is_incomplete_2
-                df.at[idx, "l3_N_gylcosylation_sites"] = find_N_glycosilation(l3_seq)
-                df.at[idx, "l3_O_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
+                df.at[idx, "l3_n_gylcosylation_sites"] = find_N_glycosilation(l3_seq)
+                df.at[idx, "l3_o_gylcosylation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
                 df.at[idx, "l3_chain"] = clean_seq_l3
 
 # O(n) complexity algorithm, I will not concede to the re automated functions
@@ -202,7 +201,7 @@ def find_N_glycosilation(seq):
 
 def calculate_antigen_chars(df):
     # If columns exist, continue, else we make them from sratch
-    for col in ["antigen_gravy", "antigen_pI", "antigen_net_charge_inflamed", "antigen_net_charge_normal", "antigen_is_incomplete"]:
+    for col in ["antigen_gravy", "antigen_pi", "antigen_net_charge_inflamed", "antigen_net_charge_normal", "antigen_is_incomplete"]:
         df[col] = float('nan')
 
     for idx, row in df.iterrows():
@@ -221,7 +220,7 @@ def calculate_antigen_chars(df):
                 df.at[idx, 'antigen_gravy'] = float(f"{val:.5g}")
 
                 val = agn.isoelectric_point()
-                df.at[idx, 'antigen_pI'] = float(f"{val:.5g}")
+                df.at[idx, 'antigen_pi'] = float(f"{val:.5g}")
 
                 val = agn.charge_at_pH(7.35)
                 df.at[idx, 'antigen_net_charge_normal'] = float(f"{val:.5g}")
