@@ -248,3 +248,9 @@ def to_list(x): #AI generated to handle lists in the values of dictionaries, hel
     if pd.isna(x):
         return []
     return [x]
+
+def _prefix(path): #AIGENERATED for SQL integration Step class
+    m = re.match(r"(\d+)", path.stem)
+    if not m:
+        raise ValueError(f"SQL filename '{path.name}' missing numeric prefix")
+    return int(m.group(1))

@@ -8,3 +8,4 @@ __pycache__/
 *$py.class
 Computation_Deposit/
 data_storage/
+backup/

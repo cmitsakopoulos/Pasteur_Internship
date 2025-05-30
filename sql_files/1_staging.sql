@@ -1,4 +1,7 @@
-- STAGING TABLES
+BEGIN;
+DROP TABLE IF EXISTS staging_cdr;
+DROP TABLE IF EXISTS staging_antigen;
+DROP TABLE IF EXISTS staging_relationships;
 
 CREATE TABLE staging_cdr (
   h3_chain                      TEXT,
@@ -45,39 +48,8 @@ CREATE TABLE staging_antigen (
   antigen_computed_id           INT
 );
 
-CREATE TABLE relationships_staging (
+CREATE TABLE staging_relationships (
   antigen_computed_id  INT,
   cdr_computed_id      INT
 );
-
--- COMMIT THE CSV INTO SQL
-\copy staging_antigen
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/antigen_20250525_165025.csv'
-  WITH (
-    FORMAT csv,
-    HEADER,
-    NULL ''            
-  );
-
---Because of how I set up the int as a boolean flag within the pipeline, we will have to stick with this method
-ALTER TABLE staging_antigen
-  ALTER COLUMN antigen_is_incomplete TYPE BOOLEAN
-  USING (antigen_is_incomplete = 1);
-
-\copy staging_cdr
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/cdr_20250525_165025.csv'
-  WITH (
-    FORMAT csv,
-    HEADER,
-    NULL ''            
-  );
-
-ALTER TABLE staging_cdr ALTER COLUMN l3_is_incomplete TYPE BOOLEAN USING (l3_is_incomplete = 1);
-
-\copy relationships_staging
-  FROM '/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Computation_Deposit/relationships_20250525_165025.csv'
-  WITH (
-    FORMAT csv,
-    HEADER,
-    NULL ''            
-  );
+COMMIT;

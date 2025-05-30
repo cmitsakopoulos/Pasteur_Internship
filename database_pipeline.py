@@ -1,4 +1,5 @@
 import os
+import sys
 import datetime
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict
@@ -6,6 +7,9 @@ import re
 from abc import ABC, abstractmethod
 from typing import Dict
 import pandas as pd
+from pathlib import Path
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 
 
 
@@ -15,6 +19,7 @@ from function_dump import (
     calculate_cdr_chars,
     calculate_antigen_chars,
     to_list,
+    _prefix,
 )
 
 #Separation of all application functions into steps, which are brought together in a recipe like way, to accomplish different tasks; aka chem, clean, or extract from version 1 (=version lame) of this program.
@@ -165,14 +170,14 @@ class Walker(Step):
     def _process_file(args):
         filepath, idx = args
         df_raw, flag = extractor(filepath)
-        if flag == True:
+        if flag:
             antigen_df = df_raw #Placeholder name literally, this is just a patch and wont affect performance
             cdr_df = "meow" #Make a dummy entry into the return clause so it doesnt break the previous code which WORKS
             return filepath, idx, antigen_df, cdr_df, flag
         else:
             antigen_df, cdr_df = parser(df_raw)
             return filepath, idx, antigen_df, cdr_df, flag
-
+        
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         tasks = []
@@ -197,14 +202,15 @@ class Walker(Step):
                         f"cdr rows={cdr_df.shape[0]}"
                     )
                 else:
+                    repeat_headers_sanity_check =  set(antigen_df.columns)
                     new_data["pipeline_flag"] = True #Add the flag into the traded dictionary...a boolean classifier seems easier to trade than a string, massive computational savings of 0s...:)
-                    if "antigen" in antigen_df.columns:
+                    if "antigen_computed_id" in repeat_headers_sanity_check:
                         new_data["antigen"] = antigen_df
                         print(
                         "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
                         f"Walker → processed {filepath!r}: "
                     )
-                    elif "cdr" in antigen_df.columns:
+                    elif "cdr_computed_id" in repeat_headers_sanity_check:
                         new_data["cdr"] = antigen_df
                         print(
                         "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
@@ -310,5 +316,68 @@ class ComputeRelationships(Step):
         new_data["relationships"] = pairs
         return new_data
     
-class AddMoreFeatures(Step):
-    pass
+class WorkWithDatabase(Step):
+    def __init__(self):
+        #Insert your local or remote SQL database connection string here: you can see mine and hack me
+        self.connection_string = "postgresql://chrismitsacopoulos:password@localhost/pasteurdb"
+        self.ddl_dir = Path(__file__).resolve().parent / 'sql_files' 
+
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        # Discover and sort all DDL scripts by numeric prefix
+        ddl_paths = sorted(self.ddl_dir.glob("*.sql"), key=_prefix)
+        if not ddl_paths:
+            raise RuntimeError(f"No DDL files found in {self.ddl_dir}")
+
+        engine = create_engine(self.connection_string)
+        with engine.begin() as conn:
+            first = ddl_paths[0]
+            print(f"WorkWithDatabase → creating staging tables from {first.name}")
+            for stmt in first.read_text(encoding="utf-8").split(";"):
+                stmt = stmt.strip()
+                if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
+                    conn.execute(stmt)
+
+            print("WorkWithDatabase → inserting DataFrames into staging tables...")
+            for key, df in data.items():
+                # skip non-DataFrame entries (e.g. pipeline_flag)
+                if not isinstance(df, pd.DataFrame):
+                    continue
+                stg_table = f"staging_{key}"
+                if not df.empty:
+                    print(f" • loading {len(df)} rows into {stg_table}")
+                    df.to_sql(stg_table, conn, if_exists="append", index=False)
+
+            # Phase 2b: alter staging_antigen column to BOOLEAN
+            print("WorkWithDatabase → altering staging_antigen.antigen_is_incomplete to BOOLEAN...")
+            conn.execute(
+                """
+                ALTER TABLE staging_antigen
+                  ALTER COLUMN antigen_is_incomplete TYPE BOOLEAN
+                  USING (antigen_is_incomplete = 1);
+                """
+            )
+            print("WorkWithDatabase → altering staging_cdr.h3_is_incomplete to BOOLEAN...")
+            conn.execute(
+                """
+                ALTER TABLE staging_cdr
+                  ALTER COLUMN h3_is_incomplete TYPE BOOLEAN
+                  USING (h3_is_incomplete = 1);
+                """
+            )
+            print("WorkWithDatabase → altering staging_cdr.l3_is_incomplete to BOOLEAN...")
+            conn.execute(
+                """
+                ALTER TABLE staging_cdr
+                  ALTER COLUMN l3_is_incomplete TYPE BOOLEAN
+                  USING (l3_is_incomplete = 1);
+                """
+            )
+            for ddl_path in ddl_paths[1:]:
+                print(f"WorkWithDatabase → applying post-load DDL {ddl_path.name}")
+                for stmt in ddl_path.read_text(encoding="utf-8").split(";"):
+                    stmt = stmt.strip()
+                    if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
+                        conn.execute(stmt)
+
+        print("WorkWithDatabase → all DDL applied and data loaded.")
+        return data
