@@ -143,7 +143,7 @@ INSERT INTO antigen_antibody_binding (
 SELECT
     cdr_computed_id,
     antigen_computed_id
-FROM relationships_staging
+FROM staging_relationships
 WHERE cdr_computed_id    IS NOT NULL
   AND antigen_computed_id IS NOT NULL
 ON CONFLICT DO NOTHING;
