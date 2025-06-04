@@ -23,7 +23,7 @@ from function_dump import (
 )
 
 @click.group(context_settings={"help_option_names": ["--help"]})
-@click.version_option("1.5")
+@click.version_option("v2.0")
 def cli():
     """Database Pipeline CLI."""
     pass
