@@ -65,12 +65,12 @@ antigen_encoder = SeqPipeline([
 antigen_encoder.fit(df[["antigen_sequence"]])
 Y_seq = antigen_encoder.transform(df[["antigen_sequence"]])
 
-#    "l3_n_gylcosylation_sites", "l3_o_gylcosylation_sites",
+#    "l3_n_glycosilation_sites", "l3_o_glycosilation_sites",
 #   "l3_net_charge_inflamed", "l3_net_charge_normal",
 #  "l3_gravy", "l3_pi",
 X_numeric = df[[
     "h3_gravy", "h3_pi",
-    "h3_n_gylcosylation_sites", "h3_o_gylcosylation_sites",
+    "h3_n_glycosilation_sites", "h3_o_glycosilation_sites",
     "h3_net_charge_inflamed", "h3_net_charge_normal"
 ]].values
 

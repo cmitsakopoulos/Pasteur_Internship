@@ -23,9 +23,9 @@ CREATE TABLE antigen_primary (
     antigen_id INT PRIMARY KEY,
     sequence   TEXT,
     isoelectric             DOUBLE PRECISION,
-    gravy            DOUBLE PRECISION,
-    net_charge_normal       DOUBLE PRECISION,
-    net_charge_inflammation DOUBLE PRECISION,
+    geary_hydrophobicity            DOUBLE PRECISION[],
+    blood_geary_charge       DOUBLE PRECISION[],
+    inflamed_geary_charge DOUBLE PRECISION[],
     CONSTRAINT fk_antigen_primary_to_central
       FOREIGN KEY (antigen_id)
       REFERENCES antigen_central(antigen_id) ON DELETE CASCADE
@@ -53,18 +53,18 @@ CREATE TABLE cdr3_primary (
     cdr3_id     INT PRIMARY KEY,
     h3_chain TEXT,
     l3_chain    TEXT,
-    h3_gravy              DOUBLE PRECISION,
-    l3_gravy                      DOUBLE PRECISION,
+    h3_geary_hydrophobicity              DOUBLE PRECISION[],
+    l3_geary_hydrophobicity                      DOUBLE PRECISION[],
     h3_pi        DOUBLE PRECISION,
     l3_pi        DOUBLE PRECISION,
-    h3_n_gylcosylation_sites      FLOAT,
-    h3_o_gylcosylation_sites      FLOAT,
-    l3_n_gylcosylation_sites      FLOAT,
-    l3_o_gylcosylation_sites      FLOAT,
-    l3_net_charge_inflamed  DOUBLE PRECISION,
-    l3_net_charge_normal DOUBLE PRECISION,
-    h3_net_charge_inflamed      DOUBLE PRECISION,
-    h3_net_charge_normal      DOUBLE PRECISION,
+    h3_n_glycosilation_sites      FLOAT,
+    h3_o_glycosilation_sites      FLOAT,
+    l3_n_glycosilation_sites      FLOAT,
+    l3_o_glycosilation_sites      FLOAT,
+    l3_inflamed_geary_charge  DOUBLE PRECISION[],
+    l3_blood_geary_charge DOUBLE PRECISION[],
+    h3_inflamed_geary_charge      DOUBLE PRECISION[],
+    h3_blood_geary_charge      DOUBLE PRECISION[],
     CONSTRAINT fk_cdr3_primary_to_central
       FOREIGN KEY (cdr3_id)
       REFERENCES cdr3_central(cdr3_id) ON DELETE CASCADE

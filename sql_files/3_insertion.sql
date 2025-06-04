@@ -38,17 +38,17 @@ INSERT INTO antigen_primary (
     antigen_id,
     sequence,
     isoelectric,
-    gravy,
-    net_charge_normal,
-    net_charge_inflammation
+    geary_hydrophobicity,
+    blood_geary_charge,
+    inflamed_geary_charge
 )
 SELECT
     antigen_computed_id,
     antigen_seq,
     antigen_pi,
-    antigen_gravy,
-    antigen_net_charge_normal,
-    antigen_net_charge_inflamed
+    antigen_geary_hydrophobicity,
+    antigen_blood_geary_charge,
+    antigen_inflamed_geary_charge
 FROM staging_antigen
 WHERE antigen_computed_id IS NOT NULL
 ON CONFLICT (antigen_id) DO NOTHING;
@@ -98,35 +98,35 @@ INSERT INTO cdr3_primary (
     cdr3_id,
     h3_chain,
     l3_chain,
-    h3_gravy,
-    l3_gravy,
+    h3_geary_hydrophobicity,
+    l3_geary_hydrophobicity,
     h3_pi,
     l3_pi,
-    h3_n_gylcosylation_sites,
-    h3_o_gylcosylation_sites,
-    l3_n_gylcosylation_sites,
-    l3_o_gylcosylation_sites,
-    l3_net_charge_inflamed,
-    l3_net_charge_normal,
-    h3_net_charge_inflamed,
-    h3_net_charge_normal
+    h3_n_glycosilation_sites,
+    h3_o_glycosilation_sites,
+    l3_n_glycosilation_sites,
+    l3_o_glycosilation_sites,
+    l3_inflamed_geary_charge,
+    l3_blood_geary_charge,
+    h3_inflamed_geary_charge,
+    h3_blood_geary_charge
 )
 SELECT
     cdr_computed_id,
     h3_chain,
     l3_chain,
-    h3_gravy,
-    l3_gravy,
+    h3_geary_hydrophobicity,
+    l3_geary_hydrophobicity,
     h3_pi,
     l3_pi,
-    h3_n_gylcosylation_sites,
-    h3_o_gylcosylation_sites,
-    l3_n_gylcosylation_sites,
-    l3_o_gylcosylation_sites,
-    h3_net_charge_normal,       
-    h3_net_charge_inflamed,
-    l3_net_charge_inflamed,
-    l3_net_charge_normal
+    h3_n_glycosilation_sites,
+    h3_o_glycosilation_sites,
+    l3_n_glycosilation_sites,
+    l3_o_glycosilation_sites,
+    h3_blood_geary_charge,       
+    h3_inflamed_geary_charge,
+    l3_inflamed_geary_charge,
+    l3_blood_geary_charge
 FROM staging_cdr
 WHERE cdr_computed_id IS NOT NULL
 ON CONFLICT (cdr3_id) DO NOTHING;

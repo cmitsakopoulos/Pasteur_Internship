@@ -1,16 +1,14 @@
 import os
-import sys
 import datetime
 from concurrent.futures import ProcessPoolExecutor
-from collections import defaultdict
 import re
 from abc import ABC, abstractmethod
 from typing import Dict
 import pandas as pd
 from pathlib import Path
 from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
+from sqlalchemy.pool import NullPool
 
 
 
@@ -336,7 +334,7 @@ class WorkWithDatabase(Step):
         if not ddl_paths:
             raise RuntimeError(f"No DDL files found in {self.ddl_dir}")
 
-        engine = create_engine(self.connection_string, echo=True)
+        engine = create_engine(self.connection_string, echo=True, poolclass=NullPool, pool_pre_ping=True) 
         with engine.begin() as conn:
             first = ddl_paths[0] #catch the staging DDL...
             print(f"WorkWithDatabase → creating staging tables from {first.name}")
