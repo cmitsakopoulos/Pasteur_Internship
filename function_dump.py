@@ -227,7 +227,7 @@ def find_N_glycosilation(seq):
 def calculate_antigen_chars(df):#Copy of the antibody related chemical chars function
     for column in  ["antigen_geary_hydrophobicity", "antigen_blood_geary_charge", "antigen_inflamed_geary_charge"]:
         df[column] = None
-    dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity()
+    dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity() #Why not call it in the Step class which handles this function? Antigen/CDR are handled separate, therefore no difference in running it here or the separate Step(s)
     for idx, row in df.iterrows():
         antigen = row.get('antigen_seq')
         if not antigen:
