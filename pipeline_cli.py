@@ -62,7 +62,6 @@ RECIPES = {
         Write,
     ],
 }
-
 def build_pipeline(recipe: str, path: str) -> Pipeline:
     steps = [step(path) if step is Walker else step() for step in RECIPES[recipe]]
     return Pipeline(steps)
@@ -79,11 +78,11 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
     "--rerun",
     "recipe",
     flag_value="rerun",
-    help='Perform all advertised functions apart from SQL injection, wipe all application component files and results if you have made radical chages.'
+    help='Perform all advertised functions apart from SQL injection, WIPE all application component files AND results if you have made radical chages to code.'
 )
 @click.argument("path", required=False)
 def run(recipe: str, path: str):
-    # Determine default path if not provided
+    # Revert to internal file path if you decide that you will not provide new files but want to rework the old ones...
     default_internal = os.path.join(os.path.dirname(__file__), "Internal_Files")
     if path is None:
         if recipe == "normal":
