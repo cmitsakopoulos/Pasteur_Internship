@@ -2,6 +2,7 @@ import sys
 import click
 import pandas as pd
 import time
+import os
 
 from database_pipeline import (
     Pipeline,
@@ -71,6 +72,7 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
     "--normal",
     "recipe",
     flag_value="normal",
+    default="normal",
     help='Perform all advertised functions apart from SQL injection, account for prior application runs to prevent recomputations.'
 )
 @click.option(
@@ -79,8 +81,19 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
     flag_value="rerun",
     help='Perform all advertised functions apart from SQL injection, wipe all application component files and results if you have made radical chages.'
 )
-@click.argument("path", type=click.Path(exists=True, file_okay=False))
+@click.argument("path", required=False)
 def run(recipe: str, path: str):
+    # Determine default path if not provided
+    default_internal = os.path.join(os.path.dirname(__file__), "Internal_Files")
+    if path is None:
+        if recipe == "normal":
+            path = default_internal
+        else:
+            raise click.BadParameter("PATH argument is required when --rerun is selected")
+    else:
+        # Validate provided path
+        if not os.path.isdir(path):
+            raise click.BadParameter(f"Path '{path}' does not exist or is not a directory")
     click.echo(f"▶ Using recipe '{recipe}' on '{path}'")
     start = time.time()
     pipeline = build_pipeline(recipe, path)
