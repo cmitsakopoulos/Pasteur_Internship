@@ -19,6 +19,7 @@ from function_dump import (
     calculate_antigen_chars,
     to_list,
     _prefix,
+    clear_dir,
 )
 
 #Separation of all application functions into steps, which are brought together in a recipe like way, to accomplish different tasks; aka chem, clean, or extract from version 1 (=version lame) of this program.
@@ -151,42 +152,55 @@ class FlattenDuplicates(Step):
             print(f"FlattenDuplicates → flattened CDR, rows: {new_data['antigen'].shape[0]}")
         return new_data
 
-class PreWalker(Step):
+class CleanUp(Step): #Connected to function in function dump, just cleans up the code here
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        pass
+        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        output_dir = os.path.join(os.path.dirname(__file__), "Computation_Deposit")
+        clear_dir(internal_dir)
+        clear_dir(output_dir)
+        data = {}
+        return data
 
-class CleanUp(Step):
+class PreWalker(Step): #Not incredibly efficient but very flexible method to check if files have already been parsed/extracted...
+    def __init__(self, input_path: str):
+        self.input_path = input_path
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        pass
+        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        input_files = list(self.input_path.rglob("*.csv"))
+        if internal_dir.is_dir(): #if stuff has been pre computed
+            processed_stems = {p.stem for p in internal_dir.rglob("*.csv")}
+            tasks_to_be = [
+                str(f)
+                for f in input_files
+                if f.stem not in processed_stems
+            ]
+            dropped = len(input_files) - len(tasks_to_be)
+            data["paths"] = tasks_to_be
+            print(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
+        else:
+            data["paths"] = input_files
+        return data
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
 #Parallelisation method to improve computational time is AI assisted code, any problems that arise are not my fault; none discovered for now.
 class Walker(Step):
     def __init__(self, input_path: str):
         self.input_path = input_path
-
     @staticmethod
     def _process_file(args):
         filepath, idx = args
         df_raw = extractor(filepath)
         antigen_df, cdr_df = parser(df_raw)
         return filepath, idx, antigen_df, cdr_df
-        
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         tasks = []
-        count = 0
-        output_dir_pf = os.path.join(os.path.dirname(__file__), "Pipeline_Files")
+        output_dir_pf = os.path.join(os.path.dirname(__file__), "Internal_Files")
         os.makedirs(output_dir_pf, exist_ok=True)
-        for root, _, files in os.walk(self.input_path): #Prepare the processpoolexecutor with a rubric of how many files we are working with, Python deals with the splitting...
-            for fname in files:
-                if not fname.lower().endswith('.csv'):
-                    continue
-                count += 1
-                filepath = os.path.join(root, fname)
-                tasks.append((filepath, count))
+        for idx, filepath in enumerate(data["paths"], start=1):
+            tasks.append((filepath, idx))
         with ProcessPoolExecutor(max_workers=2) as executor:
             for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
-                base_key = f"csv{idx}" #Keep the dfs in the dict unique, so that we dont start accidentally overwriting them....
+                base_key = f"csv{filepath}" #Keep the dfs in the dict unique, so that we dont start accidentally overwriting them....
                 new_data[f"antigen_{base_key}"] = antigen_df
                 new_data[f"cdr_{base_key}"]      = cdr_df
                 filename_abd = f"{base_key}_cdr.csv"

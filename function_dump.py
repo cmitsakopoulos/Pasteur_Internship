@@ -3,7 +3,7 @@ import sys
 import csv
 import json
 import re
-import ast
+import shutil
 import pandas as pd
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from Bio.SeqUtils.ProtParam import ProtParamData
@@ -264,3 +264,14 @@ def _prefix(path): #AIGENERATED for SQL integration Step class
     if not m:
         raise ValueError(f"SQL filename '{path.name}' missing numeric prefix")
     return int(m.group(1))
+
+def clear_dir(path: str):
+    if not os.path.isdir(path):
+        return
+    for name in os.listdir(path):
+        full = os.path.join(path, name)
+        # file → remove; dir → remove entirely
+        if os.path.isfile(full) or os.path.islink(full):
+            os.remove(full)
+        elif os.path.isdir(full):
+            shutil.rmtree(full)
