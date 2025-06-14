@@ -29,7 +29,7 @@ def split_pad_factory(length):
     return split_pad
 
 #Sklearn gives us the ability to make a pipeline to do the encoding steps for us, this is it for X sequence variables...
-
+#Do the one hot encoding separately, such that based on sequence length we create categories that are length specific, to avoid padding. Considering that both antigens and antiboides share the same amion acid basis, categories should be created with a common "logic base" per say.
 encoded_sequences = SeqPipeline([
     ("split", FunctionTransformer(split_pad_factory(max_len), validate=False)),
     ("onehot", OneHotEncoder(
@@ -57,15 +57,24 @@ antigen_encoder = SeqPipeline([
 antigen_encoder.fit(df[["antigen_sequence"]])
 Y_antigen = antigen_encoder.transform(df[["antigen_sequence"]])
 
-X_numeric = df[[
-    "h3_gravy", "l3_gravy", "h3_pi", "l3_pi",
-    "h3_n_gylcosylation_sites", "h3_o_gylcosylation_sites",
-    "l3_n_gylcosylation_sites", "l3_o_gylcosylation_sites",
-    "l3_net_charge_inflamed", "l3_net_charge_normal",
-    "h3_net_charge_inflamed", "h3_net_charge_normal"
-]].values
+# Unpack list-valued "geary" columns into 2D arrays
+h3_geary = np.vstack(df['h3_geary_hydrophobicity'].values)
+l3_geary = np.vstack(df['l3_geary_hydrophobicity'].values)
+h3_blood_charge = np.vstack(df['h3_blood_geary_charge'].values)
+l3_blood_charge = np.vstack(df['l3_blood_geary_charge'].values)
 
-Y_numeric = df[["antigen_isoelectric", "antigen_gravy", "antigen_net_charge_normal", "antigen_net_charge_inflamed"]]
+# Scalar numeric columns
+scalar_cols = [
+    "h3_pi", "l3_pi",
+    "h3_n_glycosilation_sites", "h3_o_glycosilation_sites",
+    "l3_n_glycosilation_sites", "l3_o_glycosilation_sites"
+]
+scalar_numeric = df[scalar_cols].values
+
+# Combine all numeric parts into X_numeric
+X_numeric = np.hstack([h3_geary, l3_geary, h3_blood_charge, l3_blood_charge, scalar_numeric])
+
+Y_numeric = df[["antigen_isoelectric", "antigen_geary_hydrophobicity", "antigen_blood_geary_charge", "antigen_blood_geary_charge"]]
 
 X = np.hstack([X_numeric, X_seq])  
 Y = np.hstack([Y_antigen, Y_numeric])

@@ -47,7 +47,6 @@ def extractor(filepath):
         print(f"Error: file not found: {filepath}", file=sys.stderr)
         sys.exit(1)
     else:
-        flag = False #This will help us track if the csv is from my own application or from foreign source
         records = []
         with open(filepath, newline='', encoding='utf-8') as f:
             reader = csv.reader(
@@ -63,16 +62,10 @@ def extractor(filepath):
                 print("Error: CSV file is empty", file=sys.stderr)
                 sys.exit(1)
             expected = ["json", "pdb_id", "heavy", "light", "antigen", "cl_id"]
-            if headers != expected:
-               if any(col in headers for col in ("antigen_computed_id", "cdr_computed_id", "relationships")): #Check if the file comes from the pipeline or not
-                    internal_csv = pd.read_csv(filepath)
-                    flag = True
-                    return internal_csv, flag
-               else:
-                #If the csv file is normal but NOT from my pipeline
-                    print("NORMAL csv type, reverting to standard CSV read.", file=sys.stderr)
-                    non_idiosyncratic_csv = pd.read_csv(filepath)
-                    return  non_idiosyncratic_csv, flag#If its not idiosyncratic
+            if headers != expected: #Fallback to normal csv reading if its not the diffcult one
+                print("NORMAL csv type, reverting to standard CSV read.", file=sys.stderr)
+                non_idiosyncratic_csv = pd.read_csv(filepath)
+                return  non_idiosyncratic_csv #If its not idiosyncratic
             for lineno, row in enumerate(reader, start=2):
                 if len(row) != 6:
                     print(f"Line {lineno}: expected 6 columns, got {len(row)}", file=sys.stderr)
@@ -91,7 +84,7 @@ def extractor(filepath):
                     "cl_id": cl_id
                 })
                 records.append(parsed)
-    return pd.DataFrame(records), flag #self explanatory
+    return pd.DataFrame(records) #self explanatory
 
 def parser(df):
     cdr_records = []

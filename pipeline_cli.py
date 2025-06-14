@@ -23,7 +23,7 @@ from function_dump import (
 )
 
 @click.group(context_settings={"help_option_names": ["--help"]})
-@click.version_option("v2.0")
+@click.version_option("2.0")
 def cli():
     """Database Pipeline CLI."""
     pass
@@ -33,7 +33,7 @@ RECIPES = {
         Walker,
         WorkWithDatabase
     ],
-    "complete": [
+    "normal": [
         Walker,
         Concatenation,
         FlattenDuplicates,
@@ -44,13 +44,24 @@ RECIPES = {
         ComputeRelationships,
         Write,
     ],
-        "half": [
+        "parse": [
         Walker,
         Concatenation,
         FlattenDuplicates,
         RmPurificationTags,
         CDRComputation,
         AntigenComputation,
+        Write,
+    ],
+    "rerun": [
+        Walker,
+        Concatenation,
+        FlattenDuplicates,
+        RmPurificationTags,
+        CDRComputation,
+        AntigenComputation,
+        AssignIDs,
+        ComputeRelationships,
         Write,
     ],
 }

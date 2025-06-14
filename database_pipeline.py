@@ -42,8 +42,6 @@ class Step(ABC): #Parent class to be method overrriden by specialised children
 
 class Concatenation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "pipeline_flag" in data:
-            return data
         cdr_frames = []
         antigen_frames = []
         for key, df in data.items():
@@ -83,8 +81,6 @@ class Write(Step):
 #CHEMICAL CHARACTERISTICS
 class CDRComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "pipeline_flag" in data:
-            return data
         new_data: Dict[str, pd.DataFrame] = data.copy() #Copy entire thing then mutate
         #Catch the antigen dataframes, remember that Walker will name the files antigen_csv or cdr_csv something
         if 'cdr' in new_data:
@@ -97,8 +93,6 @@ class CDRComputation(Step):
 
 class AntigenComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "pipeline_flag" in data:
-            return data     
         new_data: Dict[str, pd.DataFrame] = data.copy()   
         if 'antigen' in data:
             computation_antigen_df = new_data["antigen"]
@@ -112,8 +106,6 @@ class AntigenComputation(Step):
 # Multiple antibodies can bind to a single antigen, many antigens can sature a single antibody, this is reflected in the source data too...
 class FlattenDuplicates(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "pipeline_flag" in data:
-            return data
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
             cdr_df = data['cdr'].copy()
@@ -158,7 +150,14 @@ class FlattenDuplicates(Step):
         if 'cdr' in new_data:
             print(f"FlattenDuplicates → flattened CDR, rows: {new_data['antigen'].shape[0]}")
         return new_data
-    
+
+class PreWalker(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        pass
+
+class CleanUp(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        pass
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
 #Parallelisation method to improve computational time is AI assisted code, any problems that arise are not my fault; none discovered for now.
 class Walker(Step):
@@ -168,20 +167,17 @@ class Walker(Step):
     @staticmethod
     def _process_file(args):
         filepath, idx = args
-        df_raw, flag = extractor(filepath)
-        if flag:
-            antigen_df = df_raw #Placeholder name literally, this is just a patch and wont affect performance
-            cdr_df = "meow" #Make a dummy entry into the return clause so it doesnt break the previous code which WORKS
-            return filepath, idx, antigen_df, cdr_df, flag
-        else:
-            antigen_df, cdr_df = parser(df_raw)
-            return filepath, idx, antigen_df, cdr_df, flag
+        df_raw = extractor(filepath)
+        antigen_df, cdr_df = parser(df_raw)
+        return filepath, idx, antigen_df, cdr_df
         
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
         tasks = []
         count = 0
-        for root, _, files in os.walk(self.input_path):
+        output_dir_pf = os.path.join(os.path.dirname(__file__), "Pipeline_Files")
+        os.makedirs(output_dir_pf, exist_ok=True)
+        for root, _, files in os.walk(self.input_path): #Prepare the processpoolexecutor with a rubric of how many files we are working with, Python deals with the splitting...
             for fname in files:
                 if not fname.lower().endswith('.csv'):
                     continue
@@ -189,36 +185,23 @@ class Walker(Step):
                 filepath = os.path.join(root, fname)
                 tasks.append((filepath, count))
         with ProcessPoolExecutor(max_workers=2) as executor:
-            for filepath, idx, antigen_df, cdr_df, flag in executor.map(self._process_file, tasks):
-                if not flag:
-                    base_key = f"csv{idx}" #Keep the dfs in the dict unique, so that we dont start accidentally overwriting them....
-                    new_data[f"antigen_{base_key}"] = antigen_df
-                    new_data[f"cdr_{base_key}"]      = cdr_df
-                    #we do not store the flag such that all processes will just check if the flag exists as a dict key, if not proceed normally
-                    print(
-                        f"Walker → processed {filepath!r}: "
-                        f"antigen rows={antigen_df.shape[0]}, "
-                        f"cdr rows={cdr_df.shape[0]}"
-                    )
-                else:
-                    repeat_headers_sanity_check =  set(antigen_df.columns)
-                    new_data["pipeline_flag"] = True #Add the flag into the traded dictionary...a boolean classifier seems easier to trade than a string, massive computational savings of 0s...:)
-                    if "antigen_seq" in repeat_headers_sanity_check:
-                        new_data["antigen"] = antigen_df
-                        print(
-                        "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
-                        f"Walker → processed {filepath!r}: "
-                    )
-                    elif "h3_chain" in repeat_headers_sanity_check:
-                        new_data["cdr"] = antigen_df
-                        print(
-                        "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
-                        f"Walker → processed {filepath!r}: ")
-                    elif "cdr_computed_id" in repeat_headers_sanity_check and "antigen_computed_id" in repeat_headers_sanity_check: #if both exist then the dataframe is that of relationships
-                        new_data["relationships"] = antigen_df
-                        print(
-                        "Welcome back! pipeline_flag is now on...computations will proceed accordingly..."
-                        f"Walker → processed {filepath!r}: ")
+            for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
+                base_key = f"csv{idx}" #Keep the dfs in the dict unique, so that we dont start accidentally overwriting them....
+                new_data[f"antigen_{base_key}"] = antigen_df
+                new_data[f"cdr_{base_key}"]      = cdr_df
+                filename_abd = f"{base_key}_cdr.csv"
+                filename_agn = f"{base_key}_antigen.csv"
+                filepath_abd = os.path.join(output_dir_pf, filename_abd) 
+                filepath_agn = os.path.join(output_dir_pf, filename_agn)
+                #We write the dataframes collected from the parser mechanism into a backup directory, such that if we want to re run based on changes to the computation steps, we can do so without having to repeat the time consuming file xtraction steps
+                cdr_df.to_csv(filepath_abd, index=False)
+                antigen_df.to_csv(filepath_agn, index=False)
+                print(f"Wrote DataFrames from '{base_key}' to application component directory for backup, at: {filepath}")                   
+                print(
+                    f"Walker → processed {filepath!r}: "
+                    f"antigen rows={antigen_df.shape[0]}, "
+                    f"cdr rows={cdr_df.shape[0]}"
+                )
         return new_data
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
@@ -240,8 +223,6 @@ class RmPurificationTags(Step):
             rf'(?:{self.alteration}(?:[A-Z]{{1,{self.max_gap}}}{self.alteration})*)'
         ) #create a rubric for the purging to occur later
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "pipeline_flag" in data:
-            return data
         new_data: Dict[str, pd.DataFrame] = {}
         if "cdr" in data: # pass cdr through unchanged
             new_data["cdr"] = data["cdr"].copy()
@@ -263,8 +244,6 @@ class AssignIDs(Step):
         'S':16,  'T':17,  'V':18,  'W':19,  'Y':20,}
         self.re_pattern = re.compile(r'[ACDEFGHIKLMNPQRSTVWY]')
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "pipeline_flag" in data:
-            return data
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
             cdr_df = data["cdr"].copy()
@@ -300,8 +279,6 @@ class AssignIDs(Step):
 #Algorithmic complexity is therefore higher than pandas but whatever...preliminary trials showed that to parse throuh the entire NAStructuralDB deduplicated dataset and find 679 relationships, it takes 5 seconds on M1 Macintosh without connection to power supply!
 class ComputeRelationships(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        if "relationships" in data: #Check in case the flag system fails for some odd reason?! Dont repeat computations
-            return data
         new_data: Dict[str, pd.DataFrame] = {}
         antigens = data["antigen"].copy()
         cdrs = data["cdr"].copy()
@@ -345,9 +322,6 @@ class WorkWithDatabase(Step):
 
             print("WorkWithDatabase → inserting DataFrames into staging tables...")
             for dict_key, dict_df in data.items():
-                # skip non-DataFrame entries (e.g. pipeline_flag), aka dont try to enter the flag as a staging table
-                if not isinstance(dict_df, pd.DataFrame):
-                    continue
                 if not dict_df.empty:
                     stg_table = f"staging_{dict_key}"
                     print(f" • loading {len(dict_df)} rows into {stg_table}")
