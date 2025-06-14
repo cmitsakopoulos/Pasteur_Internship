@@ -176,10 +176,21 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
             ]
             dropped = len(input_files) - len(tasks_to_be)
             data["paths"] = tasks_to_be
+            #Log to update user
             print(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
+            #Give log to update user
+            #Unpack the processed paths we observed before, not just stems.
+            for p in internal_dir.rglob("*.csv"):
+                stem = p.stem.lower()  
+                df = pd.read_csv(p)
+                if "antigen" in stem:
+                    data[f"{stem}"] = df
+                elif "cdr" in stem:
+                    data[f"{stem}"] = df
         else:
             data["paths"] = input_files
         return data
+    
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
 #Parallelisation method to improve computational time is AI assisted code, any problems that arise are not my fault; none discovered for now.
 class Walker(Step):

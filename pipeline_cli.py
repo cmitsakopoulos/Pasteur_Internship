@@ -15,6 +15,8 @@ from database_pipeline import (
     AssignIDs,
     ComputeRelationships,
     WorkWithDatabase,
+    CleanUp,
+    PreWalker,
 )
 
 from function_dump import (
@@ -34,6 +36,7 @@ RECIPES = {
         WorkWithDatabase
     ],
     "normal": [
+        PreWalker,
         Walker,
         Concatenation,
         FlattenDuplicates,
@@ -44,16 +47,9 @@ RECIPES = {
         ComputeRelationships,
         Write,
     ],
-        "parse": [
-        Walker,
-        Concatenation,
-        FlattenDuplicates,
-        RmPurificationTags,
-        CDRComputation,
-        AntigenComputation,
-        Write,
-    ],
     "rerun": [
+        CleanUp,
+        PreWalker,
         Walker,
         Concatenation,
         FlattenDuplicates,
@@ -72,16 +68,16 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
 
 @cli.command(name="run", help="Run a configured pipeline recipe on all CSVs under a directory.")
 @click.option(
-    "--complete",
+    "--normal",
     "recipe",
-    flag_value="complete",
-    help='Pefrom parsing, filtration, concatenation, chemical characteristic calculations, purification tag removal, novel ID assignment and print to new antibody/antigen/relationships CSV files that ready for SQL'
+    flag_value="normal",
+    help='Perform all advertised functions apart from SQL injection, account for prior application runs to prevent recomputations.'
 )
 @click.option(
-    "--half",
+    "--rerun",
     "recipe",
-    flag_value="half",
-    help='Pefrom parsing, filtration, concatenation, chemical characteristic calculations and print to new antigen/antibody CSV files'
+    flag_value="rerun",
+    help='Perform all advertised functions apart from SQL injection, wipe all application component files and results if you have made radical chages.'
 )
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
 def run(recipe: str, path: str):
