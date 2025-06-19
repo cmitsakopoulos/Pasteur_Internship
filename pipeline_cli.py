@@ -63,7 +63,7 @@ RECIPES = {
     ],
 }
 def build_pipeline(recipe: str, path: str) -> Pipeline:
-    steps = [step(path) if step is Walker else step() for step in RECIPES[recipe]]
+    steps = [step(path) if step is PreWalker else step() for step in RECIPES[recipe]]
     return Pipeline(steps)
 
 @cli.command(name="run", help="Run a configured pipeline recipe on all CSVs under a directory.")

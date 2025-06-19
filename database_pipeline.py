@@ -29,7 +29,6 @@ from function_dump import (
 class Pipeline: #Receives a "recipe"/list of Step subclasses needed to produce a desired output
     def __init__(self, steps):
         self.steps = steps
-
     def run(self) -> Dict[str, pd.DataFrame]:
         data: Dict[str, pd.DataFrame] = {}
         for step in self.steps:
@@ -163,14 +162,14 @@ class CleanUp(Step): #Connected to function in function dump, just cleans up the
 
 class PreWalker(Step): #Not incredibly efficient but very flexible method to check if files have already been parsed/extracted...
     def __init__(self, input_path: str):
-        self.input_path = input_path
+        self.input_path = Path(input_path)
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        internal_dir = Path(__file__).parent / "Internal_Files"
         input_files = list(self.input_path.rglob("*.csv"))
         if internal_dir.is_dir(): #if stuff has been pre computed
             processed_stems = {p.stem for p in internal_dir.rglob("*.csv")}
             tasks_to_be = [
-                str(f)
+                str(f.resolve())
                 for f in input_files
                 if f.stem not in processed_stems
             ]
@@ -188,14 +187,12 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
                 elif "cdr" in stem:
                     data[f"{stem}"] = df
         else:
-            data["paths"] = input_files
+            data["paths"] = [str(f.resolve()) for f in input_files]
         return data
     
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
 #Parallelisation method to improve computational time is AI assisted code, any problems that arise are not my fault; none discovered for now.
 class Walker(Step):
-    def __init__(self, input_path: str):
-        self.input_path = input_path
     @staticmethod
     def _process_file(args):
         filepath, idx = args
@@ -211,14 +208,13 @@ class Walker(Step):
             tasks.append((filepath, idx))
         with ProcessPoolExecutor(max_workers=2) as executor:
             for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
-                base_key = f"csv{filepath}" #Keep the dfs in the dict unique, so that we dont start accidentally overwriting them....
+                base_key = Path(filepath).stem
                 new_data[f"antigen_{base_key}"] = antigen_df
                 new_data[f"cdr_{base_key}"]      = cdr_df
                 filename_abd = f"{base_key}_cdr.csv"
                 filename_agn = f"{base_key}_antigen.csv"
                 filepath_abd = os.path.join(output_dir_pf, filename_abd) 
                 filepath_agn = os.path.join(output_dir_pf, filename_agn)
-                #We write the dataframes collected from the parser mechanism into a backup directory, such that if we want to re run based on changes to the computation steps, we can do so without having to repeat the time consuming file xtraction steps
                 cdr_df.to_csv(filepath_abd, index=False)
                 antigen_df.to_csv(filepath_agn, index=False)
                 print(f"Wrote DataFrames from '{base_key}' to application component directory for backup, at: {filepath}")                   
@@ -277,10 +273,7 @@ class AssignIDs(Step):
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the filtering done before didnt work; maybe we dont only have ambiguous X, maybe there are additional characters
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Explanation: Perform a dictionary look up and replace each character from the re.compile/by reference to the dictionary, with the corresponding integer. Integers are deliminated using a plus sign...
-                    str_to_numbers = [int(x) for x in numeric_str.rstrip("+").split("+")] #Convert deliminated numeric string into a list of numbers...
-                    weighted_sum = sum([(index+1) * value for index, value in enumerate(str_to_numbers)]) #We start from +1 because python lists from 0, 1, 2...this makes the list weighted such that the resulting id must be unique...then we sum it in the same line
-                    cdr_df.at[idx, "cdr_computed_id"] = weighted_sum - len(seq) ** 2 #Sum the AA encodings #Multiply by taxonomic id...find solution...
+                    cdr_df.at[idx, "cdr_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq) #Sum the AA encodings #Multiply by taxonomic id...find solution...
             new_data["cdr"] = cdr_df
             print(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
         if "antigen" in data:
@@ -290,10 +283,7 @@ class AssignIDs(Step):
                 if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the previous functions have worked correctly, I learned this the hard way, however everything should be fine now...could remove in future updates
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    numeric_str = self.re_pattern.sub(lambda m: f"{self.amino_acid_rubric[m.group(0)]}+", seq) #Explanation: Perform a dictionary look up and replace each character from the re.compile/by reference to the dictionary, with the corresponding integer. Integers are deliminated using a plus sign...
-                    str_to_numbers = [int(x) for x in numeric_str.rstrip("+").split("+")] #Convert deliminated numeric string into a list of numbers...
-                    weighted_sum = sum([(index+1) * value for index, value in enumerate(str_to_numbers)]) #We start from +1 because python lists from 0, 1, 2...this makes the list weighted such that the resulting id must be unique...then we sum it in the same line
-                    ant_df.at[idx, "antigen_computed_id"] = weighted_sum - len(seq) ** 2 #Sum the AA encodings #Multiply by taxonomic id...find solution...
+                    ant_df.at[idx, "antigen_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq)  # Sum the AA encodings
             new_data["antigen"] = ant_df
             print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
