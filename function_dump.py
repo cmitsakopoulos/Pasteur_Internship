@@ -84,7 +84,7 @@ def extractor(filepath):
                     "cl_id": cl_id
                 })
                 records.append(parsed)
-    return pd.DataFrame(records) #self explanatory
+    return pd.DataFrame(records)
 
 def parser(df):
     cdr_records = []
@@ -115,7 +115,6 @@ def parser(df):
                 cdr_row['l3_chain'] = parts[0] if len(parts) > 0 else None
                 cdr_row['h3_chain'] = parts[1] if len(parts) > 1 else None
                 antigen_row['corresponding_pdb_antibody'] = f"{basic_dict.get('pdb_id')}"
-            #Append the rows to the records lists separately
             cdr_records.append(cdr_row)
             antigen_records.append(antigen_row)
     else: #MODULATE THIS FOR NEW CSVS, CANNOT BE BOTHERED TO ACCOMODATE EVERY USE CASE; MAYBE IN THE FUTURE
@@ -144,14 +143,11 @@ def parser(df):
                 antigen_row['last_update'] = pd.NA
                 cdr_records.append(cdr_row)
                 antigen_records.append(antigen_row)
-    #Convert the lists to separate dataframes
     antigen_df = pd.DataFrame(antigen_records)
     cdr_df = pd.DataFrame(cdr_records)
-    #Return based on use case
     return antigen_df, cdr_df        
 
 def calculate_cdr_chars(df):
-    #Designate columns as object type to save having to manually designate after (so they can store the geary descriptor series):
     for column in ["h3_geary_hydrophobicity", "h3_blood_geary_charge", "h3_inflamed_geary_charge", "l3_blood_geary_charge", "l3_inflamed_geary_charge", "l3_geary_hydrophobicity"]:
         df[column] = None
     dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity()
@@ -252,25 +248,18 @@ def inspect_verbose(df):
 def inspect_summary(df):
     print(f"Provided DataFrame contains {len(df)} records")
 
-def to_list(x): #AI generated to handle lists in the values of dictionaries, helps with the logic in the relationships step
+def to_list(x): 
     if isinstance(x, (list, tuple, set, pd.Series)):
         return list(x)           
     if pd.isna(x):
         return []
     return [x]
 
-def _prefix(path): #AIGENERATED for SQL integration Step class
-    m = re.match(r"(\d+)", path.stem)
-    if not m:
-        raise ValueError(f"SQL filename '{path.name}' missing numeric prefix")
-    return int(m.group(1))
-
 def clear_dir(path: str):
     if not os.path.isdir(path):
         return
     for name in os.listdir(path):
         full = os.path.join(path, name)
-        # file → remove; dir → remove entirely
         if os.path.isfile(full) or os.path.islink(full):
             os.remove(full)
         elif os.path.isdir(full):

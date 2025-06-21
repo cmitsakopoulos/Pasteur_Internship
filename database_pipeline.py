@@ -60,16 +60,14 @@ class Concatenation(Step):
         else:
             result['antigen'] = pd.DataFrame()
             print("No Antigens, moving on")
-
         print(f"Concatenation → output keys: {list(result.keys())}")
         return result
 
 class Write(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        # Ensure directory exists; else we die
         output_dir = os.path.join(os.path.dirname(__file__), "Computation_Deposit")
         os.makedirs(output_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") #can remove if you want, obviously
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         for key, df in data.items():
             filename = f"{key}_{ts}.csv"
             filepath = os.path.join(output_dir, filename)
@@ -81,19 +79,18 @@ class Write(Step):
 #CHEMICAL CHARACTERISTICS
 class CDRComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = data.copy() #Copy entire thing then mutate
-        #Catch the antigen dataframes, remember that Walker will name the files antigen_csv or cdr_csv something
+        new_data: Dict[str, pd.DataFrame] = data.copy()
         if 'cdr' in new_data:
             computation_cdr_df = new_data["cdr"]
             calculate_cdr_chars(computation_cdr_df)
             new_data['cdr'] = computation_cdr_df
         if 'cdr' in new_data:
             print(f"CDRComputation → processed cdr, rows: {new_data['cdr'].shape[0]}")
-        return new_data #return "mutated" dataframe, feed back into the system
+        return new_data
 
 class AntigenComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = data.copy()   
+        new_data: Dict[str, pd.DataFrame] = data.copy()
         if 'antigen' in data:
             computation_antigen_df = new_data["antigen"]
             calculate_antigen_chars(computation_antigen_df)
@@ -109,7 +106,7 @@ class FlattenDuplicates(Step):
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
             cdr_df = data['cdr'].copy()
-            if not cdr_df['h3_chain'].duplicated().any(): #Forgot to add a clause by which if there are no duplicates, we skip...AND return the df as is
+            if not cdr_df['h3_chain'].duplicated().any():
                 print(f"FlattenDuplicates → no CDR duplicates found, keeping {len(cdr_df)} rows")
                 new_data['cdr'] = cdr_df
             else:
@@ -128,7 +125,7 @@ class FlattenDuplicates(Step):
                 new_data['cdr'] = flat_cdr
         if 'antigen' in data:
             df = data['antigen'].copy()
-            if not df['antigen_seq'].duplicated().any(): 
+            if not df['antigen_seq'].duplicated().any():
                 print(f"FlattenDuplicates → no Antigen duplicates found, keeping {len(df)} rows")
                 new_data['antigen'] = df
             else:
@@ -166,7 +163,7 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         internal_dir = Path(__file__).parent / "Internal_Files"
         input_files = list(self.input_path.rglob("*.csv"))
-        if internal_dir.is_dir(): #if stuff has been pre computed
+        if internal_dir.is_dir():
             processed_stems = {p.stem for p in internal_dir.rglob("*.csv")}
             tasks_to_be = [
                 str(f.resolve())
@@ -175,12 +172,9 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
             ]
             dropped = len(input_files) - len(tasks_to_be)
             data["paths"] = tasks_to_be
-            #Log to update user
             print(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
-            #Give log to update user
-            #Unpack the processed paths we observed before, not just stems.
             for p in internal_dir.rglob("*.csv"):
-                stem = p.stem.lower()  
+                stem = p.stem.lower()
                 df = pd.read_csv(p)
                 if "antigen" in stem:
                     data[f"{stem}"] = df
@@ -213,11 +207,11 @@ class Walker(Step):
                 new_data[f"cdr_{base_key}"]      = cdr_df
                 filename_abd = f"{base_key}_cdr.csv"
                 filename_agn = f"{base_key}_antigen.csv"
-                filepath_abd = os.path.join(output_dir_pf, filename_abd) 
+                filepath_abd = os.path.join(output_dir_pf, filename_abd)
                 filepath_agn = os.path.join(output_dir_pf, filename_agn)
                 cdr_df.to_csv(filepath_abd, index=False)
                 antigen_df.to_csv(filepath_agn, index=False)
-                print(f"Wrote DataFrames from '{base_key}' to application component directory for backup, at: {filepath}")                   
+                print(f"Wrote DataFrames from '{base_key}' to application component directory for backup, at: {filepath}")
                 print(
                     f"Walker → processed {filepath!r}: "
                     f"antigen rows={antigen_df.shape[0]}, "
@@ -227,25 +221,22 @@ class Walker(Step):
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
 class RmPurificationTags(Step):
-    def __init__(self):#Each class is only instantiated once as it is a componenent in the larger recipe called by the cli, so this, which is normally bad practice, ill leave, as it makes no difference due to being instantiated just once/just how I know how to do it...
-        # we compile the pattern for motifs once, then it looks for it hopefully finds it..
+    def __init__(self):
         self.motifs = {
             "c-Myc": "EQKLISEEDL",
             "6-His": "HHHHHH",
-            "5-His": "HHHHH", #Seems like in the NAStructural DB, some of the antigenic sequences have N or C-terminal pentameric His-tags attached...accidental clipping of the sequence at the ends?!
+            "5-His": "HHHHH",
             "FLAG":  "DYKDDDDK",
             "V5":    "GKPIPNPLLGLDST",
         }
-        self.max_gap = 6 #Change if you want to make the gap between purifiaction tag motifs smaller...
-        #Preparing for alteration (aka so that "re" can look for c-Myc OR '|' FLAG OR/AND 6-His)
+        self.max_gap = 6
         self.alteration = "|".join(map(re.escape, self.motifs.values()))
-        # one motif, followed by 0-N chunks of ≤7 AAs + another motif
         self.clusters = re.compile(
             rf'(?:{self.alteration}(?:[A-Z]{{1,{self.max_gap}}}{self.alteration})*)'
-        ) #create a rubric for the purging to occur later
+        )
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data: Dict[str, pd.DataFrame] = {}
-        if "cdr" in data: # pass cdr through unchanged
+        if "cdr" in data:
             new_data["cdr"] = data["cdr"].copy()
         if "antigen" in data:
             df = data["antigen"].copy()
@@ -257,7 +248,7 @@ class RmPurificationTags(Step):
 
 #Remember, this step is ONLY intended for assigning unique identifiers, this is uninformative encoding, all prior information is lost dramatically; the sequence cannot possibly be discerned from the computed ID. 
 class AssignIDs(Step):
-    def __init__(self): #Each class is only instantiated once as it is a componenent in the larger recipe called by the cli, so this which is normally bad practice, ill leave as it makes no difference due to being instantiated just once/just how I know how to do it...
+    def __init__(self):
         self.amino_acid_rubric = {
         'A': 1,  'C': 2,  'D': 3,  'E': 4,  'F': 5,
         'G': 6,  'H': 7,  'I': 8,  'K': 9,  'L':10,
@@ -268,22 +259,22 @@ class AssignIDs(Step):
         new_data: Dict[str, pd.DataFrame] = {}
         if 'cdr' in data:
             cdr_df = data["cdr"].copy()
-            cdr_df["cdr_computed_id"] = pd.NA #Introduce new column for our computed id
+            cdr_df["cdr_computed_id"] = pd.NA
             for idx, seq in cdr_df["h3_chain"].items():
-                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the filtering done before didnt work; maybe we dont only have ambiguous X, maybe there are additional characters
+                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq):
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    cdr_df.at[idx, "cdr_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq) #Sum the AA encodings #Multiply by taxonomic id...find solution...
+                    cdr_df.at[idx, "cdr_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq)
             new_data["cdr"] = cdr_df
             print(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
         if "antigen" in data:
             ant_df = data["antigen"].copy()
-            ant_df["antigen_computed_id"] = pd.NA 
+            ant_df["antigen_computed_id"] = pd.NA
             for idx, seq in ant_df["antigen_seq"].items():
-                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq): #Check if the previous functions have worked correctly, I learned this the hard way, however everything should be fine now...could remove in future updates
+                if re.search(r'[^ACDEFGHIKLMNPQRSTVWY]', seq):
                     raise ValueError(f"Illegal residue in {seq!r} at row {idx}")
                 else:
-                    ant_df.at[idx, "antigen_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq)  # Sum the AA encodings
+                    ant_df.at[idx, "antigen_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq)
             new_data["antigen"] = ant_df
             print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
@@ -301,14 +292,12 @@ class ComputeRelationships(Step):
         cdrs["pdb_list"]     = cdrs["pdb_id"].apply(to_list)
         ag_exp  = antigens.explode("pdb_list")[["antigen_computed_id", "pdb_list"]]
         cdr_exp = cdrs.explode("pdb_list")[["cdr_computed_id",     "pdb_list"]]
-        #Instead of the iterative search for matches, I preferred to now leverage the pandas inbuilt C-based hash join (as it is described online)
         pairs = (
             pd.merge(ag_exp, cdr_exp, on="pdb_list", how="inner")
               [["antigen_computed_id", "cdr_computed_id"]]
               .drop_duplicates()
               .reset_index(drop=True)
         )
-        # Assign outputs, dropping helper column
         new_data["antigen"]       = antigens.drop(columns=["pdb_list"])
         new_data["cdr"]           = cdrs.drop(columns=["pdb_list"])
         new_data["relationships"] = pairs
@@ -316,33 +305,26 @@ class ComputeRelationships(Step):
     
 class WorkWithDatabase(Step):
     def __init__(self):
-        #Insert your local or remote SQL database connection string here: you can see mine and hack me
         self.connection_string = "postgresql://chrismitsacopoulos:password@localhost/pasteurdb"
-        self.ddl_dir = Path(__file__).resolve().parent / 'sql_files' 
-
+        self.ddl_dir = Path(__file__).resolve().parent / 'sql_files'
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        # Discover and sort all DDL scripts by numeric prefix
         ddl_paths = sorted(self.ddl_dir.glob("*.sql"), key=_prefix)
         if not ddl_paths:
             raise RuntimeError(f"No DDL files found in {self.ddl_dir}")
-
-        engine = create_engine(self.connection_string, echo=True, poolclass=NullPool, pool_pre_ping=True) 
+        engine = create_engine(self.connection_string, echo=True, poolclass=NullPool, pool_pre_ping=True)
         with engine.begin() as conn:
-            first = ddl_paths[0] #catch the staging DDL...
+            first = ddl_paths[0]
             print(f"WorkWithDatabase → creating staging tables from {first.name}")
             for stmt in first.read_text(encoding="utf-8").split(";"):
                 stmt = stmt.strip()
                 if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
                     conn.execute(text(stmt))
-
             print("WorkWithDatabase → inserting DataFrames into staging tables...")
             for dict_key, dict_df in data.items():
                 if not dict_df.empty:
                     stg_table = f"staging_{dict_key}"
                     print(f" • loading {len(dict_df)} rows into {stg_table}")
                     dict_df.to_sql(stg_table, conn, if_exists="append", index=False)
-
-            # Alter the is_incomplete columns into easily readeable boolean values instead of floating point 1.0 or 0.0 as booleans
             print("WorkWithDatabase → altering staging_antigen.antigen_is_incomplete to BOOLEAN...")
             conn.execute(text(      """
                 ALTER TABLE staging_antigen
@@ -364,12 +346,11 @@ class WorkWithDatabase(Step):
                   USING (l3_is_incomplete = 1);
                 """)
             )
-            for ddl_path in ddl_paths[1:]: #Continue after staging tables have been built, then populated and modified; see above 
+            for ddl_path in ddl_paths[1:]:
                 print(f"WorkWithDatabase → applying post-load DDL {ddl_path.name}")
                 for stmt in ddl_path.read_text(encoding="utf-8").split(";"):
                     stmt = stmt.strip()
                     if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
                         conn.execute(text(stmt))
-
         print("WorkWithDatabase → all DDL applied and data loaded.")
         return data

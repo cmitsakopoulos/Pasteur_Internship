@@ -82,7 +82,6 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
 )
 @click.argument("path", required=False)
 def run(recipe: str, path: str):
-    # Revert to internal file path if you decide that you will not provide new files but want to rework the old ones...
     default_internal = os.path.join(os.path.dirname(__file__), "Internal_Files")
     if path is None:
         if recipe == "normal":
@@ -90,7 +89,6 @@ def run(recipe: str, path: str):
         else:
             raise click.BadParameter("PATH argument is required when --rerun is selected")
     else:
-        # Validate provided path
         if not os.path.isdir(path):
             raise click.BadParameter(f"Path '{path}' does not exist or is not a directory")
     click.echo(f"▶ Using recipe '{recipe}' on '{path}'")
@@ -125,7 +123,6 @@ def database_work(recipe: str, path: str):
     click.echo(f"✔ Done in {elapsed:.2f} seconds.")
 
 
-# Add a 'help' subcommand to show help for all commands or a specific command
 @cli.command(name="help", help="Show help for all commands or a specific command.")
 @click.argument("command", required=False)
 def help_cmd(command):
@@ -133,7 +130,6 @@ def help_cmd(command):
     Show the top-level help or help for a specific subcommand.
     """
     ctx = click.get_current_context()
-    # If no command specified, show top-level help
     if not command:
         click.echo(ctx.parent.get_help())
     else:
@@ -141,7 +137,6 @@ def help_cmd(command):
         if cmd is None:
             click.echo(f"No such command: {command}", err=True)
         else:
-            # Create a new context for the subcommand to retrieve its help
             cmd_ctx = click.Context(cmd, info_name=command)
             click.echo(cmd.get_help(cmd_ctx))
 
