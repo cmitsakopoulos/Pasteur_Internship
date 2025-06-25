@@ -101,11 +101,10 @@ def main():
             path_run = st.text_input("Input Directory", value="./Internal_Files", help="Directory containing raw data.")
             
             if st.button("Execute Pipeline", type="primary", use_container_width=True):
-                st.session_state.log_output = [] # Reset logs
+                st.session_state.log_output = [] 
                 def log_to_state(message):
                     st.session_state.log_output.append(message)
-                
-                # Replace this with your actual function
+
                 result_df = run(recipe, path_run, st) 
                 st.session_state.latest_result_df = result_df
 
