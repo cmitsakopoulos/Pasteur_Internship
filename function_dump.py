@@ -255,6 +255,12 @@ def to_list(x):
         return []
     return [x]
 
+def prefix(path): 
+    m = re.match(r"(\d+)", path.stem)
+    if not m:
+        raise ValueError(f"SQL filename '{path.name}' missing numeric prefix")
+    return int(m.group(1))
+
 def clear_dir(path: str):
     if not os.path.isdir(path):
         return

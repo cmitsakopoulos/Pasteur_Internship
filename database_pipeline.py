@@ -18,7 +18,7 @@ from function_dump import (
     calculate_cdr_chars,
     calculate_antigen_chars,
     to_list,
-    _prefix,
+    prefix,
     clear_dir,
 )
 
@@ -308,7 +308,7 @@ class WorkWithDatabase(Step):
         self.connection_string = "postgresql://chrismitsacopoulos:password@localhost/pasteurdb"
         self.ddl_dir = Path(__file__).resolve().parent / 'sql_files'
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        ddl_paths = sorted(self.ddl_dir.glob("*.sql"), key=_prefix)
+        ddl_paths = sorted(self.ddl_dir.glob("*.sql"), key=prefix)
         if not ddl_paths:
             raise RuntimeError(f"No DDL files found in {self.ddl_dir}")
         engine = create_engine(self.connection_string, echo=True, poolclass=NullPool, pool_pre_ping=True)

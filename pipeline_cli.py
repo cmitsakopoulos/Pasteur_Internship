@@ -1,4 +1,3 @@
-import sys
 import click
 import pandas as pd
 import time
