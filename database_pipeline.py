@@ -170,7 +170,7 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
                 for f in input_files
                 if f.stem not in processed_stems
             ]
-            dropped = len(input_files) - len(tasks_to_be)
+            dropped = len(list(internal_dir.glob('*.csv')))
             data["paths"] = tasks_to_be
             print(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
             for p in internal_dir.rglob("*.csv"):
