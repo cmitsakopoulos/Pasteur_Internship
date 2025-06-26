@@ -365,32 +365,22 @@ class LevenshteinDistance(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         output_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
         os.makedirs(output_dir, exist_ok=True)
-        output_filepath = os.path.join(output_dir, 'h3_chain_dist_matrix.npy')
+        output_filepath = os.path.join(output_dir, 'h3_chain_dist_matrix.npz')
         dataframe = data["cdr"]
         h3_sequences = dataframe["h3_chain"].tolist()
         print(f"Extracted {len(h3_sequences)} unique sequences from 'h3_chain' column.")
         print("Calculating pairwise distance matrix...")
         start_time = time.time()
-            
         distance_matrix = process.cdist(
             h3_sequences,
             h3_sequences,
             scorer=distance.Levenshtein.distance,
             workers=-1
         )
-        
         end_time = time.time()
         print(f"Matrix calculation finished in {end_time - start_time:.4f} seconds.")
         print(f"Shape of the distance matrix: {distance_matrix.shape}")
         print(f"Saving matrix to '{output_filepath}'...")
-        np.save(output_filepath, distance_matrix)
+        np.savez(output_filepath, matrix=distance_matrix, sequences=np.array(h3_sequences, dtype=object))
         print("Save complete.")
-        print("\n--- Verifying by reloading the matrix ---")
-        if os.path.exists(output_filepath):
-            reloaded_matrix = np.load(output_filepath)
-            print(f"Successfully reloaded matrix from '{output_filepath}'.")
-            print(f"Shape of reloaded matrix: {reloaded_matrix.shape}")
-        else:
-            print("Saved file not found.")
-
         return data
