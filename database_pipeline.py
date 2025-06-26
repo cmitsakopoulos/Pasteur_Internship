@@ -27,9 +27,28 @@ from function_dump import (
 #Object oriented approach, where dfs are the key object being traded between classes/functions, enables more accesible operation with different file formats. I cannot train my database solely with a former parser that reads only NAstructural database csvs.
 #CLI is connected and feeds a list of steps depending on the type of recipe the user wants to use: ex. complete to do a full treatment of teh raw data, or simple for testing purposes. Inspect clauses are handled independently. I preferred inspection with manually created functions, because pandas is nicer than dunder methods. 
 
+#New implementation, introducing a logger so that the streamlit app can work with multithreading. This class assumes the function of a visitor, logging the former print statements and storing them, so that the GUI can read them...
+class FileLogger:
+    def __init__(self, job_id: str, log_dir: str = "Internal_Files"):
+        os.makedirs(log_dir, exist_ok=True)
+        self.filename = os.path.abspath(os.path.join(log_dir, f"{job_id}.log"))
+        self.file_handle = open(self.filename, 'w', encoding='utf-8')
+    def log(self, message: str):
+        log_entry = f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n"
+        print(log_entry, end='')
+        if self.file_handle and not self.file_handle.closed:
+            self.file_handle.write(log_entry)
+            self.file_handle.flush()
+    def get_filename(self) -> str:
+        return self.filename
+    def close(self):
+        if self.file_handle and not self.file_handle.closed:
+            self.file_handle.close()
+
 class Pipeline: #Receives a "recipe"/list of Step subclasses needed to produce a desired output
-    def __init__(self, steps):
+    def __init__(self, steps, logger: FileLogger):
         self.steps = steps
+        self.logger = logger
     def run(self) -> Dict[str, pd.DataFrame]:
         data: Dict[str, pd.DataFrame] = {}
         for step in self.steps:
@@ -37,6 +56,8 @@ class Pipeline: #Receives a "recipe"/list of Step subclasses needed to produce a
         return data
     
 class Step(ABC): #Parent class to be method overrriden by specialised children
+    def __init__(self, logger: FileLogger):
+        self.logger = logger
     @abstractmethod
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         pass
@@ -55,13 +76,13 @@ class Concatenation(Step):
             result['cdr'] = pd.concat(cdr_frames, ignore_index=True)
         else:
             result['cdr'] = pd.DataFrame()
-            print("No CDRS, moving on")
+            self.logger.log("No CDRS, moving on")
         if antigen_frames:
             result['antigen'] = pd.concat(antigen_frames, ignore_index=True)
         else:
             result['antigen'] = pd.DataFrame()
-            print("No Antigens, moving on")
-        print(f"Concatenation → output keys: {list(result.keys())}")
+            self.logger.log("No Antigens, moving on")
+        self.logger.log(f"Concatenation → output keys: {list(result.keys())}")
         return result
 
 class Write(Step):
@@ -73,8 +94,8 @@ class Write(Step):
             filename = f"{key}_{ts}.csv"
             filepath = os.path.join(output_dir, filename)
             df.to_csv(filepath, index=False)
-            print(f"Wrote DataFrame '{key}' to {filepath}")
-        print(f"Write → wrote {len(data)} tables: {list(data.keys())}")
+            self.logger.log(f"Wrote DataFrame '{key}' to {filepath}")
+        self.logger.log(f"Write → wrote {len(data)} tables: {list(data.keys())}")
         return {}
 
 #CHEMICAL CHARACTERISTICS
@@ -86,7 +107,7 @@ class CDRComputation(Step):
             calculate_cdr_chars(computation_cdr_df)
             new_data['cdr'] = computation_cdr_df
         if 'cdr' in new_data:
-            print(f"CDRComputation → processed cdr, rows: {new_data['cdr'].shape[0]}")
+            self.logger.log(f"CDRComputation → processed cdr, rows: {new_data['cdr'].shape[0]}")
         return new_data
 
 class AntigenComputation(Step):
@@ -97,7 +118,7 @@ class AntigenComputation(Step):
             calculate_antigen_chars(computation_antigen_df)
             new_data['antigen'] = computation_antigen_df
         if 'antigen' in new_data:
-            print(f"AntigenComputation → processed antigen, rows: {new_data['antigen'].shape[0]}")
+            self.logger.log(f"AntigenComputation → processed antigen, rows: {new_data['antigen'].shape[0]}")
         return new_data
 #CHEMICAL CHARACTERISTICS
 
@@ -108,7 +129,7 @@ class FlattenDuplicates(Step):
         if 'cdr' in data:
             cdr_df = data['cdr'].copy()
             if not cdr_df['h3_chain'].duplicated().any():
-                print(f"FlattenDuplicates → no CDR duplicates found, keeping {len(cdr_df)} rows")
+                self.logger.log(f"FlattenDuplicates → no CDR duplicates found, keeping {len(cdr_df)} rows")
                 new_data['cdr'] = cdr_df
             else:
                 search_dict = {
@@ -127,7 +148,7 @@ class FlattenDuplicates(Step):
         if 'antigen' in data:
             df = data['antigen'].copy()
             if not df['antigen_seq'].duplicated().any():
-                print(f"FlattenDuplicates → no Antigen duplicates found, keeping {len(df)} rows")
+                self.logger.log(f"FlattenDuplicates → no Antigen duplicates found, keeping {len(df)} rows")
                 new_data['antigen'] = df
             else:
                 agg_dict = {
@@ -144,9 +165,9 @@ class FlattenDuplicates(Step):
                 )
                 new_data['antigen'] = flat_df
         if 'antigen' in new_data:
-            print(f"FlattenDuplicates → flattened antigen, rows: {new_data['antigen'].shape[0]}")
+            self.logger.log(f"FlattenDuplicates → flattened antigen, rows: {new_data['antigen'].shape[0]}")
         if 'cdr' in new_data:
-            print(f"FlattenDuplicates → flattened CDR, rows: {new_data['cdr'].shape[0]}")
+            self.logger.log(f"FlattenDuplicates → flattened CDR, rows: {new_data['cdr'].shape[0]}")
         return new_data
 
 class CleanUp(Step): #Connected to function in function dump, just cleans up the code here
@@ -159,7 +180,8 @@ class CleanUp(Step): #Connected to function in function dump, just cleans up the
         return data
 
 class PreWalker(Step): #Not incredibly efficient but very flexible method to check if files have already been parsed/extracted...it will also read files within the common directory if needed.
-    def __init__(self, input_path: str):
+    def __init__(self, input_path: str, logger: FileLogger):
+        super().__init__(logger) 
         self.input_path = Path(input_path)
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         internal_dir = Path(__file__).parent / "Internal_Files"
@@ -173,7 +195,7 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
             ]
             dropped = len(list(internal_dir.glob('*.csv')))
             data["paths"] = tasks_to_be
-            print(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
+            self.logger.log(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
             for p in internal_dir.rglob("*.csv"):
                 stem = p.stem.lower()
                 df = pd.read_csv(p)
@@ -208,14 +230,14 @@ class Walker(Step):
                     filename_agn = f"{base_key}_antigen.csv"
                     filepath_agn = os.path.join(output_dir_pf, filename_agn)
                     antigen_df.to_csv(filepath_agn, index=False)
-                    print(f"Wrote Antigen DataFrame from '{base_key}' to {filepath_agn}")
+                    self.logger.log(f"Wrote Antigen DataFrame from '{base_key}' to {filepath_agn}")
                 if not cdr_df.empty:
                     new_data[f"cdr_{base_key}"] = cdr_df
                     filename_abd = f"{base_key}_cdr.csv"
                     filepath_abd = os.path.join(output_dir_pf, filename_abd)
                     cdr_df.to_csv(filepath_abd, index=False)
-                    print(f"Wrote CDR DataFrame from '{base_key}' to {filepath_abd}")
-                print(
+                    self.logger.log(f"Wrote CDR DataFrame from '{base_key}' to {filepath_abd}")
+                self.logger.log(
                     f"Walker → processed {filepath!r}: "
                     f"antigen rows={antigen_df.shape[0]}, "
                     f"cdr rows={cdr_df.shape[0]}"
@@ -227,7 +249,8 @@ class Walker(Step):
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
 class RmPurificationTags(Step):
-    def __init__(self):
+    def __init__(self, logger: FileLogger):
+        super().__init__(logger)
         self.motifs = {
             "c-Myc": "EQKLISEEDL",
             "6-His": "HHHHHH",
@@ -249,12 +272,13 @@ class RmPurificationTags(Step):
             for idx, seq in df["antigen_seq"].items():
                 df.at[idx, "antigen_seq"] = self.clusters.sub("", seq)
             new_data["antigen"] = df
-            print(f"RmPurificationTags → cleaned antigenic sequences in the following number of rows: {new_data['antigen'].shape[0]}")
+            self.logger.log(f"RmPurificationTags → cleaned antigenic sequences in the following number of rows: {new_data['antigen'].shape[0]}")
         return new_data
 
 #Remember, this step is ONLY intended for assigning unique identifiers, this is uninformative encoding, all prior information is lost dramatically; the sequence cannot possibly be discerned from the computed ID. 
 class AssignIDs(Step):
-    def __init__(self):
+    def __init__(self, logger: FileLogger):
+        super().__init__(logger)
         self.amino_acid_rubric = {
         'A': 1,  'C': 2,  'D': 3,  'E': 4,  'F': 5,
         'G': 6,  'H': 7,  'I': 8,  'K': 9,  'L':10,
@@ -272,7 +296,7 @@ class AssignIDs(Step):
                 else:
                     cdr_df.at[idx, "cdr_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq)
             new_data["cdr"] = cdr_df
-            print(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
+            self.logger.log(f"AssignIDs → assigned {new_data['cdr'].shape[0]} sequence based IDs")
         if "antigen" in data:
             ant_df = data["antigen"].copy()
             ant_df["antigen_computed_id"] = pd.NA
@@ -282,7 +306,7 @@ class AssignIDs(Step):
                 else:
                     ant_df.at[idx, "antigen_computed_id"] = self.re_pattern.sub(lambda m: str(self.amino_acid_rubric[m.group(0)]), seq)
             new_data["antigen"] = ant_df
-            print(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
+            self.logger.log(f"AssignIDs → assigned {new_data['antigen'].shape[0]} sequence based IDs")
         return new_data
 
 
@@ -310,7 +334,8 @@ class ComputeRelationships(Step):
         return new_data
     
 class WorkWithDatabase(Step):
-    def __init__(self):
+    def __init__(self, logger: FileLogger):
+        super().__init__(logger)
         self.connection_string = "postgresql://chrismitsacopoulos:password@localhost/pasteurdb"
         self.ddl_dir = Path(__file__).resolve().parent / 'sql_files'
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
@@ -320,32 +345,32 @@ class WorkWithDatabase(Step):
         engine = create_engine(self.connection_string, echo=True, poolclass=NullPool, pool_pre_ping=True)
         with engine.begin() as conn:
             first = ddl_paths[0]
-            print(f"WorkWithDatabase → creating staging tables from {first.name}")
+            self.logger.log(f"WorkWithDatabase → creating staging tables from {first.name}")
             for stmt in first.read_text(encoding="utf-8").split(";"):
                 stmt = stmt.strip()
                 if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
                     conn.execute(text(stmt))
-            print("WorkWithDatabase → inserting DataFrames into staging tables...")
+            self.logger.log("WorkWithDatabase → inserting DataFrames into staging tables...")
             for dict_key, dict_df in data.items():
                 if not dict_df.empty:
                     stg_table = f"staging_{dict_key}"
-                    print(f" • loading {len(dict_df)} rows into {stg_table}")
+                    self.logger.log(f" • loading {len(dict_df)} rows into {stg_table}")
                     dict_df.to_sql(stg_table, conn, if_exists="append", index=False)
-            print("WorkWithDatabase → altering staging_antigen.antigen_is_incomplete to BOOLEAN...")
+            self.logger.log("WorkWithDatabase → altering staging_antigen.antigen_is_incomplete to BOOLEAN...")
             conn.execute(text(      """
                 ALTER TABLE staging_antigen
                   ALTER COLUMN antigen_is_incomplete TYPE BOOLEAN
                   USING (antigen_is_incomplete = 1);
                 """)
             )
-            print("WorkWithDatabase → altering staging_cdr.h3_is_incomplete to BOOLEAN...")
+            self.logger.log("WorkWithDatabase → altering staging_cdr.h3_is_incomplete to BOOLEAN...")
             conn.execute(text(         """
                 ALTER TABLE staging_cdr
                   ALTER COLUMN h3_is_incomplete TYPE BOOLEAN
                   USING (h3_is_incomplete = 1);
                 """)
             )
-            print("WorkWithDatabase → altering staging_cdr.l3_is_incomplete to BOOLEAN...")
+            self.logger.log("WorkWithDatabase → altering staging_cdr.l3_is_incomplete to BOOLEAN...")
             conn.execute(text( """
                 ALTER TABLE staging_cdr
                   ALTER COLUMN l3_is_incomplete TYPE BOOLEAN
@@ -353,12 +378,12 @@ class WorkWithDatabase(Step):
                 """)
             )
             for ddl_path in ddl_paths[1:]:
-                print(f"WorkWithDatabase → applying post-load DDL {ddl_path.name}")
+                self.logger.log(f"WorkWithDatabase → applying post-load DDL {ddl_path.name}")
                 for stmt in ddl_path.read_text(encoding="utf-8").split(";"):
                     stmt = stmt.strip()
                     if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
                         conn.execute(text(stmt))
-        print("WorkWithDatabase → all DDL applied and data loaded.")
+        self.logger.log("WorkWithDatabase → all DDL applied and data loaded.")
         return data
     
 class LevenshteinDistance(Step):
@@ -368,8 +393,8 @@ class LevenshteinDistance(Step):
         output_filepath = os.path.join(output_dir, 'h3_chain_dist_matrix.npz')
         dataframe = data["cdr"]
         h3_sequences = dataframe["h3_chain"].tolist()
-        print(f"Extracted {len(h3_sequences)} unique sequences from 'h3_chain' column.")
-        print("Calculating pairwise distance matrix...")
+        self.logger.log(f"Extracted {len(h3_sequences)} unique sequences from 'h3_chain' column.")
+        self.logger.log("Calculating pairwise distance matrix...")
         start_time = time.time()
         distance_matrix = process.cdist(
             h3_sequences,
@@ -378,9 +403,9 @@ class LevenshteinDistance(Step):
             workers=-1
         )
         end_time = time.time()
-        print(f"Matrix calculation finished in {end_time - start_time:.4f} seconds.")
-        print(f"Shape of the distance matrix: {distance_matrix.shape}")
-        print(f"Saving matrix to '{output_filepath}'...")
+        self.logger.log(f"Matrix calculation finished in {end_time - start_time:.4f} seconds.")
+        self.logger.log(f"Shape of the distance matrix: {distance_matrix.shape}")
+        self.logger.log(f"Saving matrix to '{output_filepath}'...")
         np.savez(output_filepath, matrix=distance_matrix, sequences=np.array(h3_sequences, dtype=object))
-        print("Save complete.")
+        self.logger.log("Save complete.")
         return data
