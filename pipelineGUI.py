@@ -70,8 +70,8 @@ def main():
                 "Select Recipe",
                 ('Standard', 'Rerun'),
                 captions=[
-                    "Run on new data.",
-                    "Delete existing results and re-process all data."
+                    "Start fresh, or run for first time.",
+                    "All advertised functions/takes into account pre-parsed files, only parses new."
                 ],
                 horizontal=True
             )
