@@ -63,8 +63,8 @@ def main():
     control_col, dashboard_col = st.columns((1, 2))
 
     with control_col:
-        st.title("🧬 Pipeline Control Panel")
-        st.markdown("Configure and execute data processing and analysis tasks.")
+        st.image("logo.png", width=230)
+        st.title("Control Panel")
 
         if st.session_state.running_job_id and st.session_state.active_thread:
             if not st.session_state.active_thread.is_alive():
@@ -85,7 +85,7 @@ def main():
                 st.session_state.running_job_id = None
                 st.session_state.active_thread = None
 
-        with st.expander("▶️ **1. Process Raw Data**", expanded=True):
+        with st.expander("**1. Process Raw Data**", expanded=True):
             st.info("This pipeline processes raw experimental files into a structured format.")
             recipe = st.radio("Select Recipe", ('Standard', 'Rerun'),
                 captions=["Clears prior results and runs fresh.", "Runs on new files only."],
@@ -106,7 +106,7 @@ def main():
                 else:
                     st.warning("Another pipeline is already running.")
         
-        with st.expander("🧮 **2. Compute Distance Matrix**"):
+        with st.expander("**2. Compute Distance Matrix**"):
             st.info("Calculates the Levenshtein distance between sequences in processed data.")
             available_dirs_dist = get_subdirectories()
             default_index_dist = available_dirs_dist.index("Internal_Files") if "Internal_Files" in available_dirs_dist else 0
@@ -124,7 +124,7 @@ def main():
                 else:
                     st.warning("Another pipeline is already running.")
 
-        with st.expander("🔍 **3. Inspect a Data File**"):
+        with st.expander("**3. Inspect a Data File**"):
             st.info("Quickly analyze the contents and structure of any CSV file.")
             uploaded_file = st.file_uploader("Upload a data file for analysis", type=["csv"], help="Upload a processed or external CSV file.")
             col1, col2 = st.columns(2)
