@@ -182,6 +182,7 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
                     data[f"cdr_{stem}"] = df
         else:
             data["paths"] = [str(f.resolve()) for f in input_files]
+        print(data)
         return data
     
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
@@ -219,6 +220,9 @@ class Walker(Step):
                     f"antigen rows={antigen_df.shape[0]}, "
                     f"cdr rows={cdr_df.shape[0]}"
                 )
+        for key, df in data.items(): #Without it the dataframes were being nuked...
+            if key != 'paths' and key not in new_data:
+                new_data[key] = df
         return new_data
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
