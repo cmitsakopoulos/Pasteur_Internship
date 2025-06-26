@@ -17,6 +17,7 @@ from database_pipeline import (
     WorkWithDatabase,
     CleanUp,
     PreWalker,
+    LevenshteinDistance,
 )
 
 from function_dump import (
@@ -36,18 +37,6 @@ RECIPES = {
         WorkWithDatabase
     ],
     "normal": [
-        PreWalker,
-        Walker,
-        Concatenation,
-        FlattenDuplicates,
-        RmPurificationTags,
-        CDRComputation,
-        AntigenComputation,
-        AssignIDs,
-        ComputeRelationships,
-        Write,
-    ],
-    "rerun": [
         CleanUp,
         PreWalker,
         Walker,
@@ -60,6 +49,19 @@ RECIPES = {
         ComputeRelationships,
         Write,
     ],
+    "rerun": [
+        PreWalker,
+        Walker,
+        Concatenation,
+        FlattenDuplicates,
+        RmPurificationTags,
+        CDRComputation,
+        AntigenComputation,
+        AssignIDs,
+        ComputeRelationships,
+        Write,
+    ],
+    "distance": [PreWalker, Walker, Concatenation, LevenshteinDistance],
 }
 def build_pipeline(recipe: str, path: str) -> Pipeline:
     steps = [step(path) if step is PreWalker else step() for step in RECIPES[recipe]]
@@ -83,10 +85,10 @@ def build_pipeline(recipe: str, path: str) -> Pipeline:
 def run(recipe: str, path: str):
     default_internal = os.path.join(os.path.dirname(__file__), "Internal_Files")
     if path is None:
-        if recipe == "normal":
+        if recipe == "rerun":
             path = default_internal
         else:
-            raise click.BadParameter("PATH argument is required when --rerun is selected")
+            raise click.BadParameter("PATH argument is required when --normal is selected")
     else:
         if not os.path.isdir(path):
             raise click.BadParameter(f"Path '{path}' does not exist or is not a directory")
@@ -121,6 +123,20 @@ def database_work(recipe: str, path: str):
     elapsed = time.time() - start
     click.echo(f"✔ Done in {elapsed:.2f} seconds.")
 
+@cli.command(name="distance", help="Calculate Levenshtein distance. Uses internal files directory if no path is provided.")
+@click.argument("path", required=False, type=click.Path(exists=True, dir_okay=False))
+def distance(path: str):
+    recipe = "distance"
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        if not os.path.isdir(path):
+            raise click.BadParameter(f"The default directory '{path}' does not exist. Please create it or provide a path.")
+    click.echo(f"▶ Using recipe '{recipe}' on '{path}'")
+    start = time.time()
+    pipeline = build_pipeline(recipe, path)
+    pipeline.run()
+    elapsed = time.time() - start
+    click.echo(f"✔ Done in {elapsed:.2f} seconds.")
 
 @cli.command(name="help", help="Show help for all commands or a specific command.")
 @click.argument("command", required=False)

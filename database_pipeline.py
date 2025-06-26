@@ -1,16 +1,17 @@
 import os
 import datetime
+import time
 from concurrent.futures import ProcessPoolExecutor
 import re
 from abc import ABC, abstractmethod
 from typing import Dict
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy import text
 from sqlalchemy.pool import NullPool
-
-
+from rapidfuzz import process, distance
 
 from function_dump import (
     extractor,
@@ -182,7 +183,6 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
                     data[f"cdr_{stem}"] = df
         else:
             data["paths"] = [str(f.resolve()) for f in input_files]
-        print(data)
         return data
     
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
@@ -359,4 +359,38 @@ class WorkWithDatabase(Step):
                     if stmt and not re.fullmatch(r"(?i)(BEGIN|COMMIT|ROLLBACK)", stmt):
                         conn.execute(text(stmt))
         print("WorkWithDatabase → all DDL applied and data loaded.")
+        return data
+    
+class LevenshteinDistance(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        output_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        os.makedirs(output_dir, exist_ok=True)
+        output_filepath = os.path.join(output_dir, 'h3_chain_dist_matrix.npy')
+        dataframe = data["cdr"]
+        h3_sequences = dataframe["h3_chain"].tolist()
+        print(f"Extracted {len(h3_sequences)} unique sequences from 'h3_chain' column.")
+        print("Calculating pairwise distance matrix...")
+        start_time = time.time()
+            
+        distance_matrix = process.cdist(
+            h3_sequences,
+            h3_sequences,
+            scorer=distance.Levenshtein.distance,
+            workers=-1
+        )
+        
+        end_time = time.time()
+        print(f"Matrix calculation finished in {end_time - start_time:.4f} seconds.")
+        print(f"Shape of the distance matrix: {distance_matrix.shape}")
+        print(f"Saving matrix to '{output_filepath}'...")
+        np.save(output_filepath, distance_matrix)
+        print("Save complete.")
+        print("\n--- Verifying by reloading the matrix ---")
+        if os.path.exists(output_filepath):
+            reloaded_matrix = np.load(output_filepath)
+            print(f"Successfully reloaded matrix from '{output_filepath}'.")
+            print(f"Shape of reloaded matrix: {reloaded_matrix.shape}")
+        else:
+            print("Saved file not found.")
+
         return data

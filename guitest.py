@@ -6,7 +6,7 @@ import contextlib
 import psutil
 
 from database_pipeline import (
-    Pipeline, Walker, Concatenation, CDRComputation, AntigenComputation, FlattenDuplicates, Write, RmPurificationTags, AssignIDs, ComputeRelationships, WorkWithDatabase, CleanUp, PreWalker,)
+    Pipeline, Walker, Concatenation, CDRComputation, AntigenComputation, FlattenDuplicates, Write, RmPurificationTags, AssignIDs, ComputeRelationships, WorkWithDatabase, CleanUp, PreWalker, LevenshteinDistance)
 
 from function_dump import (
     inspect_summary, inspect_verbose,)
@@ -17,6 +17,7 @@ RECIPES = {
         AssignIDs, ComputeRelationships, Write],
     "Rerun": [CleanUp, PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation,
         AssignIDs, ComputeRelationships, Write],
+    "Distance Matrix": [PreWalker, Walker, Concatenation, LevenshteinDistance]
 }
 
 def build_pipeline(recipe: str, path: str) -> Pipeline:
@@ -108,6 +109,21 @@ def main():
                 result_df = run(recipe, path_run, st)
                 if result_df is not None:
                     st.session_state.latest_result_df = result_df
+
+        with st.expander("🧮 **Compute Distance Matrix**"):
+            # The 'value' is set to the default location where your pipeline saves files.
+            path_dist = st.text_input("Source Directory", value="./Internal_Files", key="dist_matrix_path", help="")
+            
+            if st.button("Calculate and Save Matrix", type="primary", use_container_width=True):
+                # Clear previous logs and results
+                st.session_state.log_output = []
+                st.session_state.latest_result_df = pd.DataFrame()
+                result = run("Distance Matrix", path_dist, st)
+                if result is not None:
+                    st.session_state.latest_result_df = result
+                    st.success("Distance matrix calculation complete. Check logs and results.")
+                else:
+                    st.error("Distance matrix calculation failed. Please check the logs for errors.")
 
         with st.expander("🔍 **Inspect a File**"):
             uploaded_file = st.file_uploader("Upload a CSV for inspection", type="csv")
