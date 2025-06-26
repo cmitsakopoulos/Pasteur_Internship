@@ -145,7 +145,7 @@ class FlattenDuplicates(Step):
         if 'antigen' in new_data:
             print(f"FlattenDuplicates → flattened antigen, rows: {new_data['antigen'].shape[0]}")
         if 'cdr' in new_data:
-            print(f"FlattenDuplicates → flattened CDR, rows: {new_data['antigen'].shape[0]}")
+            print(f"FlattenDuplicates → flattened CDR, rows: {new_data['cdr'].shape[0]}")
         return new_data
 
 class CleanUp(Step): #Connected to function in function dump, just cleans up the code here
@@ -157,7 +157,7 @@ class CleanUp(Step): #Connected to function in function dump, just cleans up the
         data = {}
         return data
 
-class PreWalker(Step): #Not incredibly efficient but very flexible method to check if files have already been parsed/extracted...
+class PreWalker(Step): #Not incredibly efficient but very flexible method to check if files have already been parsed/extracted...it will also read files within the common directory if needed.
     def __init__(self, input_path: str):
         self.input_path = Path(input_path)
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
@@ -177,15 +177,14 @@ class PreWalker(Step): #Not incredibly efficient but very flexible method to che
                 stem = p.stem.lower()
                 df = pd.read_csv(p)
                 if "antigen" in stem:
-                    data[f"{stem}"] = df
+                    data[f"antigen_{stem}"] = df
                 elif "cdr" in stem:
-                    data[f"{stem}"] = df
+                    data[f"cdr_{stem}"] = df
         else:
             data["paths"] = [str(f.resolve()) for f in input_files]
         return data
     
 #Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
-#Parallelisation method to improve computational time is AI assisted code, any problems that arise are not my fault; none discovered for now.
 class Walker(Step):
     @staticmethod
     def _process_file(args):
@@ -203,15 +202,18 @@ class Walker(Step):
         with ProcessPoolExecutor(max_workers=2) as executor:
             for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
                 base_key = Path(filepath).stem
-                new_data[f"antigen_{base_key}"] = antigen_df
-                new_data[f"cdr_{base_key}"]      = cdr_df
-                filename_abd = f"{base_key}_cdr.csv"
-                filename_agn = f"{base_key}_antigen.csv"
-                filepath_abd = os.path.join(output_dir_pf, filename_abd)
-                filepath_agn = os.path.join(output_dir_pf, filename_agn)
-                cdr_df.to_csv(filepath_abd, index=False)
-                antigen_df.to_csv(filepath_agn, index=False)
-                print(f"Wrote DataFrames from '{base_key}' to application component directory for backup, at: {filepath}")
+                if not antigen_df.empty:
+                    new_data[f"antigen_{base_key}"] = antigen_df
+                    filename_agn = f"{base_key}_antigen.csv"
+                    filepath_agn = os.path.join(output_dir_pf, filename_agn)
+                    antigen_df.to_csv(filepath_agn, index=False)
+                    print(f"Wrote Antigen DataFrame from '{base_key}' to {filepath_agn}")
+                if not cdr_df.empty:
+                    new_data[f"cdr_{base_key}"] = cdr_df
+                    filename_abd = f"{base_key}_cdr.csv"
+                    filepath_abd = os.path.join(output_dir_pf, filename_abd)
+                    cdr_df.to_csv(filepath_abd, index=False)
+                    print(f"Wrote CDR DataFrame from '{base_key}' to {filepath_abd}")
                 print(
                     f"Walker → processed {filepath!r}: "
                     f"antigen rows={antigen_df.shape[0]}, "

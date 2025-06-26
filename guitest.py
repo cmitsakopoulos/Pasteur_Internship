@@ -101,12 +101,13 @@ def main():
             path_run = st.text_input("Input Directory", value="./Internal_Files", help="Directory containing raw data.")
             
             if st.button("Execute Pipeline", type="primary", use_container_width=True):
-                st.session_state.log_output = [] 
+                st.session_state.log_output = []
                 def log_to_state(message):
                     st.session_state.log_output.append(message)
 
-                result_df = run(recipe, path_run, st) 
-                st.session_state.latest_result_df = result_df
+                result_df = run(recipe, path_run, st)
+                if result_df is not None:
+                    st.session_state.latest_result_df = result_df
 
         with st.expander("🔍 **Inspect a File**"):
             uploaded_file = st.file_uploader("Upload a CSV for inspection", type="csv")
@@ -147,43 +148,66 @@ def main():
         with tab_status:
             st.subheader("Live System Status")
 
+            # Get the current python process to track its own memory usage
+            current_process = psutil.Process()
+
             if "monitoring" not in st.session_state:
                 st.session_state.monitoring = False
 
             if st.button("Toggle Live Monitoring"):
                 st.session_state.monitoring = not st.session_state.monitoring
+                st.rerun() 
+
+            # More professional user messages
+            if st.session_state.monitoring:
+                st.success("Live monitoring is active. System metrics will refresh periodically.")
+            else:
+                st.info("Live monitoring is inactive. Displaying a static resource snapshot. Activate monitoring for real-time updates.")
+
+            st.markdown("##### System-Wide Resources")
+            col1, col2 = st.columns(2)
+            with col1:
+                cpu_metric = st.empty()
+                cpu_chart = st.empty()
+            with col2:
+                mem_metric = st.empty()
+                mem_chart = st.empty()
+            
+            st.markdown("##### Application-Specific Resources")
+            app_mem_metric = st.empty()
+            # More professional caption
+            st.caption("Represents the memory allocated to the Streamlit dashboard process (Resident Set Size).")
 
             if st.session_state.monitoring:
-                st.success("Live monitoring is ON. The stats below will update every 2 seconds.")
-            else:
-                st.warning("Live monitoring is OFF. Click the button to start.")
+                while True:
+                    # System-wide stats
+                    cpu_usage = psutil.cpu_percent(interval=1)
+                    mem_info = psutil.virtual_memory()
 
-            cpu_metric = st.empty()
-            mem_metric = st.empty()
-            cpu_chart = st.empty()
-            mem_chart = st.empty()
+                    # Process-specific RAM (RSS: Resident Set Size)
+                    process_mem_mb = current_process.memory_info().rss / (1024**2)
 
-            while st.session_state.monitoring:
-                cpu_usage = psutil.cpu_percent(interval=1)
-                mem_info = psutil.virtual_memory()
-                mem_percent = mem_info.percent
-
-                mem_used_gb = f"{mem_info.used / (1024**3):.2f}"
-                mem_total_gb = f"{mem_info.total / (1024**3):.2f}"
-
-                cpu_metric.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
-                mem_metric.metric(label="System RAM Usage (GB)", value=f"{mem_used_gb} / {mem_total_gb}")
+                    cpu_metric.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
+                    cpu_chart.progress(int(cpu_usage))
+                    
+                    mem_metric.metric(label="System RAM Usage", value=f"{(mem_info.total - mem_info.available) / (1024**3):.2f} GB / {mem_info.total / (1024**3):.2f} GB")
+                    mem_chart.progress(int(mem_info.percent))
                 
-                cpu_chart.progress(int(cpu_usage), text=f"CPU: {cpu_usage}%")
-                mem_chart.progress(int(mem_percent), text=f"RAM: {mem_percent}%")
-                time.sleep(1)
+                    app_mem_metric.metric(label="App RAM Usage", value=f"{process_mem_mb:.2f} MB")
+                    
+                    time.sleep(1) 
             else: 
                 cpu_usage = psutil.cpu_percent()
                 mem_info = psutil.virtual_memory()
+                process_mem_mb = current_process.memory_info().rss / (1024**2)
+
                 cpu_metric.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
-                mem_metric.metric(label="System RAM Usage (GB)", value=f"{mem_info.used / (1024**3):.2f} / {mem_info.total / (1024**3):.2f}")
-                cpu_chart.progress(int(cpu_usage), text=f"CPU: {cpu_usage}%")
-                mem_chart.progress(int(mem_info.percent), text=f"RAM: {mem_info.percent}%")
+                cpu_chart.progress(int(cpu_usage))
+                
+                mem_metric.metric(label="System RAM Usage", value=f"{(mem_info.total - mem_info.available) / (1024**3):.2f} GB / {mem_info.total / (1024**3):.2f} GB")
+                mem_chart.progress(int(mem_info.percent))
+                
+                app_mem_metric.metric(label="App RAM Usage", value=f"{process_mem_mb:.2f} MB")
 
 
 if __name__ == "__main__":

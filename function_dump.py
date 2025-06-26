@@ -86,7 +86,23 @@ def extractor(filepath):
                 records.append(parsed)
     return pd.DataFrame(records)
 
+"""
+Introduced new function to check for the dataframe "health", if it is from the pipeline, 
+then continue correctly.
+"""
 def parser(df):
+    parsed_cdr_cols = {'h3_chain', 'l3_chain', 'pdb_id'}
+    parsed_antigen_cols = {'antigen_seq', 'database_origin', "last_update", "heavy_host_organism_name"}
+    if parsed_cdr_cols.issubset(df.columns):
+        print("Skipping nascent parsing, DataFrame already contains CDR columns.")
+        empty_antigen_df = pd.DataFrame(...)
+        return empty_antigen_df, df
+
+    if parsed_antigen_cols.issubset(df.columns):
+        print("Skipping nascent parsing, DataFrame already contains Antigen columns.")
+        empty_cdr_df = pd.DataFrame(...)
+        return df, empty_cdr_df
+    
     cdr_records = []
     antigen_records = []
     if 'basic' in df.columns: # IF IDIOSYNCRATIC
@@ -156,6 +172,7 @@ def calculate_cdr_chars(df):
         h3_seq = row.get('h3_chain')
         if not h3_seq:
             print(f"Row {idx} has no H3 sequence.")
+            return None
         else:
             is_incomplete_3 = int('X' in h3_seq)
             clean_seq_h3     = h3_seq.replace('X', '')
@@ -221,6 +238,7 @@ def calculate_antigen_chars(df):#Copy of the antibody related chemical chars fun
         antigen = row.get('antigen_seq')
         if not antigen:
             print(f"Row {idx} has no antigen sequence.")
+            return None
         else:
             is_incomplete = int('X' in antigen)
             clean_seq     = antigen.replace('X', '')
