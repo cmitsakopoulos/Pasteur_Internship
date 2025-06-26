@@ -53,7 +53,6 @@ def main():
         layout="wide"
     )
 
-    # Simplified session state: only one variable for text output is needed.
     if "text_output" not in st.session_state:
         st.session_state.text_output = ""
 
@@ -149,7 +148,6 @@ def main():
         with tab_results:
             st.subheader("Log / Text Output")
             
-            # This is now the ONLY output area.
             if st.session_state.text_output:
                  st.code(st.session_state.text_output, language='bash')
             else:
@@ -157,7 +155,6 @@ def main():
 
         with tab_status:
             st.subheader("Live System Status")
-            # ... The rest of the tab_status code is unchanged ...
             current_process = psutil.Process()
             if "monitoring" not in st.session_state:
                 st.session_state.monitoring = False
