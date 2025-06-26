@@ -111,11 +111,8 @@ def main():
                     st.session_state.latest_result_df = result_df
 
         with st.expander("🧮 **Compute Distance Matrix**"):
-            # The 'value' is set to the default location where your pipeline saves files.
             path_dist = st.text_input("Source Directory", value="./Internal_Files", key="dist_matrix_path", help="")
-            
             if st.button("Calculate and Save Matrix", type="primary", use_container_width=True):
-                # Clear previous logs and results
                 st.session_state.log_output = []
                 st.session_state.latest_result_df = pd.DataFrame()
                 result = run("Distance Matrix", path_dist, st)
@@ -125,15 +122,49 @@ def main():
                 else:
                     st.error("Distance matrix calculation failed. Please check the logs for errors.")
 
-        with st.expander("🔍 **Inspect a File**"):
-            uploaded_file = st.file_uploader("Upload a CSV for inspection", type="csv")
-            if st.button("Inspect File", use_container_width=True):
-                head_df, summary = inspect_dummy_file(uploaded_file, st)
-                if head_df is not None:
-                    st.session_state.latest_result_df = head_df
-                    st.session_state.inspection_summary = summary
-            
-            st.button("Visualize Data (Dummy)", use_container_width=True, disabled=True)
+        with st.expander("🔍 **Inspect a File**", expanded=True):
+            uploaded_file = st.file_uploader(
+                "Upload a data file for analysis",
+                type=["csv"],
+                help="Upload a CSV file to generate either a high-level summary or a detailed column-by-column analysis."
+            )
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("Quick Summary", use_container_width=True, disabled=not uploaded_file):
+                    st.session_state.latest_result_df = pd.DataFrame()
+                    st.session_state.inspection_summary = ""
+                    
+                    log_capture_string = StringIO()
+                    try:
+                        with contextlib.redirect_stdout(log_capture_string):
+                            df = pd.read_csv(uploaded_file)
+                            inspect_summary(df) 
+                        
+                        st.session_state.inspection_summary = log_capture_string.getvalue()
+                        st.success("Quick summary generated.")
+                    except Exception as e:
+                        st.error(f"Failed to generate summary: {e}")
+
+            with col2:
+                if st.button("Detailed Analysis", use_container_width=True, disabled=not uploaded_file):
+                    st.session_state.latest_result_df = pd.DataFrame()
+                    st.session_state.inspection_summary = ""
+                    
+                    log_capture_string = StringIO()
+                    try:
+                        with contextlib.redirect_stdout(log_capture_string):
+                            df = pd.read_csv(uploaded_file)
+                            inspect_verbose(df) 
+                        
+                        st.session_state.inspection_summary = log_capture_string.getvalue()
+                        st.success("Detailed analysis complete.")
+                    except Exception as e:
+                        st.error(f"Failed to run analysis: {e}")
+
+            if not uploaded_file:
+                st.info("Please upload a file to enable inspection.")
 
     # Right Column:
     with dashboard_col:
