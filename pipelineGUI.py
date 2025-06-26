@@ -63,7 +63,7 @@ def main():
     control_col, dashboard_col = st.columns((1, 2))
 
     with control_col:
-        st.image("logo.png", width=230)
+        st.image("logo.png", width=230 )
         st.title("Control Panel")
 
         if st.session_state.running_job_id and st.session_state.active_thread:
@@ -85,7 +85,7 @@ def main():
                 st.session_state.running_job_id = None
                 st.session_state.active_thread = None
 
-        with st.expander("**1. Process Raw Data**", expanded=True):
+        with st.expander("**1. Process Raw Data**", expanded=False):
             st.info("This pipeline processes raw experimental files into a structured format.")
             recipe = st.radio("Select Recipe", ('Standard', 'Rerun'),
                 captions=["Clears prior results and runs fresh.", "Runs on new files only."],
