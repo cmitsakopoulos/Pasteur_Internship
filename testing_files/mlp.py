@@ -18,7 +18,7 @@ df = pd.read_sql_query("SELECT * FROM training_dataset", sql_engine)
 """
 Big problem-> For one hot encoding to actually work, we need to make all sequences in one column be the same length. Therefore, the split_pad function introduces X characters which are NOT in the alphabet (see amino_acids) and OneHotEncoder has been instructed to IGNORE them when creating categories and mapping out sequence features...
 """
-amino_acids = list("ACDEFGHIKLMNPQRSTVWY") ax() 
+amino_acids = list("ACDEFGHIKLMNPQRSTVWY")
 
 antigen_max_len = df["antigen_sequence"].str.len().max()
 
