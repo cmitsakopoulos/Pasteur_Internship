@@ -3,10 +3,10 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from sklearn.manifold import MDS
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import MeanShift
 
 st.set_page_config(layout="wide")
-st.title("Interactive Hierarchical Clustering of Sequence Data")
+st.title("Interactive Mean Shift Clustering of Sequence Data")
 
 PATH_TO_DATA = "/Users/chrismitsacopoulos/Desktop/Pasteur_Internship/Internal_Files/h3_chain_dist_matrix.npz"
 
@@ -46,26 +46,24 @@ coords_df = create_mds_coordinates(PATH_TO_DATA)
 
 if 'cluster_labels' not in st.session_state:
     st.session_state.cluster_labels = None
+    st.session_state.n_clusters_found = 0
 
 st.sidebar.header("Clustering Controls")
-n_clusters = st.sidebar.number_input(
-    'Select number of clusters to extract',
-    min_value=2,
-    max_value=20,
-    value=5,
-    step=1
-)
+st.sidebar.write("Mean Shift automatically discovers the number of clusters.")
 
-if st.sidebar.button("Run Agglomerative Clustering"):
+if st.sidebar.button("Run Mean Shift Clustering"):
     if coords_df is not None:
-        agg_clustering = AgglomerativeClustering(n_clusters=n_clusters)
-        st.session_state.cluster_labels = agg_clustering.fit_predict(coords_df[['x', 'y']])
-        st.success(f"Successfully clustered data into {n_clusters} groups.")
+        mean_shift = MeanShift(bin_seeding=True)
+        st.session_state.cluster_labels = mean_shift.fit_predict(coords_df[['x', 'y']])
+        n_clusters_found = len(np.unique(st.session_state.cluster_labels))
+        st.session_state.n_clusters_found = n_clusters_found
+        st.success(f"Successfully clustered data into {n_clusters_found} groups.")
     else:
         st.sidebar.error("Data not loaded. Cannot run clustering.")
 
 if st.sidebar.button("Clear Clustering Results"):
     st.session_state.cluster_labels = None
+    st.session_state.n_clusters_found = 0
 
 if coords_df is not None:
     plot_df = coords_df.copy()
@@ -81,7 +79,7 @@ if coords_df is not None:
         y='y',
         color=color_map,
         hover_data=['id', 'cluster'] if color_map else ['id'],
-        title="MDS Plot with Agglomerative Clustering"
+        title="MDS Plot with Mean Shift Clustering"
     )
 
     fig.update_traces(marker=dict(size=8))
