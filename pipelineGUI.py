@@ -11,7 +11,7 @@ from database_pipeline import (
     FileLogger, Pipeline, Concatenation, CDRComputation, 
     AntigenComputation, FlattenDuplicates, Write, RmPurificationTags, 
     AssignIDs, ComputeRelationships, WorkWithDatabase, CleanUp, 
-    PreWalker, LevenshteinDistance, Walker
+    PreWalker, LevenshteinDistance, Walker, GetDensity, GenerateUMAP, Dendrogram, HDBSCAN,
 )
 from function_dump import inspect_summary, inspect_verbose
 
@@ -20,24 +20,33 @@ RECIPES = {
         AssignIDs, ComputeRelationships, Write],
     "Rerun": [PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation,
         AssignIDs, ComputeRelationships, Write],
-    "Distance Matrix": [PreWalker, Walker, Concatenation, LevenshteinDistance]
+    "Distance Matrix": [PreWalker, Walker, Concatenation, LevenshteinDistance],
+    "Generate Scatter Plot": [GenerateUMAP],
+    "Identify MinClusterNum": [GenerateUMAP, GetDensity],
+    "Dendrogram": [GenerateUMAP, Dendrogram],
+    "Perform Clustering": [GenerateUMAP, HDBSCAN]
 }
 
-def build_pipeline(recipe: str, path: str, logger: FileLogger) -> Pipeline:
-    logger.log(f"Building '{recipe}' pipeline for path: {path}")
+def build_pipeline(recipe: str, path: str, logger: FileLogger, params: dict = None) -> Pipeline:
+    if params is None:
+        params = {}
+    logger.log(f"Building '{recipe}' pipeline for path: {path} with params: {params}")
     steps = []
     for step_class in RECIPES[recipe]:
         if step_class is PreWalker:
             steps.append(step_class(input_path=path, logger=logger))
+        elif step_class is Dendrogram or step_class is HDBSCAN:
+            min_size = params.get('min_cluster_size', 15)
+            steps.append(step_class(logger=logger, min_cluster_size=min_size))
         else:
             steps.append(step_class(logger=logger))
     return Pipeline(steps, logger)
 
-def run_pipeline_worker(job_id, recipe, path):
+def run_pipeline_worker(job_id, recipe, path, params: dict = None):
     logger = None
     try:
         logger = FileLogger(job_id)
-        pipeline = build_pipeline(recipe, path, logger)
+        pipeline = build_pipeline(recipe, path, logger, params)
         pipeline.run()
     except BaseException as e:
         if logger:
@@ -106,23 +115,79 @@ def main():
                 else:
                     st.warning("Another pipeline is already running.")
         
-        with st.expander("**2. Compute Distance Matrix**"):
-            st.info("Calculates the Levenshtein distance between sequences in processed data.")
-            available_dirs_dist = get_subdirectories()
-            default_index_dist = available_dirs_dist.index("Internal_Files") if "Internal_Files" in available_dirs_dist else 0
-            path_dist = st.selectbox("Select Source Directory", available_dirs_dist, index=default_index_dist, key="path_dist_select", help="Select the directory containing the processed CSV file.")
-            if st.button("Calculate and Save Matrix", type="primary", use_container_width=True):
+        with st.expander("**2. Analysis & Visualisation**", expanded=False):
+            st.info("Calculate sequence distances, generate visualisations, and perform clustering.")
+            path_analysis = "./Internal_Files"
+            abs_path_analysis = os.path.abspath(path_analysis)
+
+            st.subheader("Stage 1: Pre-computation")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Calculate Distance Matrix", use_container_width=True):
+                    if not st.session_state.running_job_id:
+                        st.session_state.text_output = ""
+                        job_id = f"job_{time.time()}"
+                        st.session_state.running_job_id = job_id
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", abs_path_analysis))
+                        st.session_state.active_thread = thread
+                        thread.start()
+                        st.info("Started distance matrix calculation.")
+                    else: st.warning("Another pipeline is already running.")
+            with col2:
+                if st.button("Generate UMAP Plot", use_container_width=True):
+                    if not st.session_state.running_job_id:
+                        st.session_state.text_output = ""
+                        job_id = f"job_{time.time()}"
+                        st.session_state.running_job_id = job_id
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Generate Scatter Plot", abs_path_analysis))
+                        st.session_state.active_thread = thread
+                        thread.start()
+                        st.info("Started UMAP generation.")
+                    else: st.warning("Another pipeline is already running.")
+            
+            st.divider()
+            st.subheader("Stage 2: Clustering Analysis")
+            
+            if st.button("Analyse Cluster Stability", use_container_width=True):
                 if not st.session_state.running_job_id:
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
                     st.session_state.running_job_id = job_id
-                    abs_path_dist = os.path.abspath(path_dist)
-                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", abs_path_dist))
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Identify MinClusterNum", abs_path_analysis))
                     st.session_state.active_thread = thread
                     thread.start()
-                    st.info("Started distance matrix calculation in the background.")
-                else:
-                    st.warning("Another pipeline is already running.")
+                    st.info("Started stability analysis.")
+                else: st.warning("Another pipeline is already running.")
+
+            st.divider()
+            st.subheader("Stage 3: Perform Clustering")
+            min_size = st.number_input("Minimum Cluster Size", min_value=2, value=15, step=1, help="Set the minimum cluster size for Dendrogram and HDBSCAN steps.")
+            
+            col3, col4 = st.columns(2)
+            with col3:
+                if st.button("Generate Dendrogram", use_container_width=True):
+                    if not st.session_state.running_job_id:
+                        st.session_state.text_output = ""
+                        job_id = f"job_{time.time()}"
+                        st.session_state.running_job_id = job_id
+                        params = {'min_cluster_size': min_size}
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Dendrogram", abs_path_analysis, params))
+                        st.session_state.active_thread = thread
+                        thread.start()
+                        st.info("Started dendrogram generation.")
+                    else: st.warning("Another pipeline is already running.")
+            with col4:
+                if st.button("Perform HDBSCAN Clustering", type="primary", use_container_width=True):
+                    if not st.session_state.running_job_id:
+                        st.session_state.text_output = ""
+                        job_id = f"job_{time.time()}"
+                        st.session_state.running_item_id = job_id
+                        params = {'min_cluster_size': min_size}
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Perform Clustering", abs_path_analysis, params))
+                        st.session_state.active_thread = thread
+                        thread.start()
+                        st.info("Started HDBSCAN clustering.")
+                    else: st.warning("Another pipeline is already running.")
 
         with st.expander("**3. Inspect a Data File**"):
             st.info("Quickly analyze the contents and structure of any CSV file.")
@@ -153,12 +218,31 @@ def main():
             if not uploaded_file: st.caption("Upload a file to enable inspection options.")
 
     with dashboard_col:
+
         st.header("Activity & Results")
-        tab_results, tab_status = st.tabs(["Results", "Resources"])
-        with tab_results:
+
+        def display_html_plot(path, header):
+            if os.path.exists(path):
+                st.subheader(header)
+                with open(path, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                st.components.v1.html(html_content, height=500, scrolling=True)
+
+        tab_plots, tab_logs, tab_status = st.tabs(["Visualisations", "Logs", "Resources"])
+        
+        with tab_plots:
+
+            st.info("Interactive plots generated by the pipeline will appear here.")
+            display_html_plot("Internal_Files/unclustered_umap_plot.html", "UMAP Projection")
+            display_html_plot("Internal_Files/cluster_plot.html", "HDBSCAN Clustering Result")
+            display_html_plot("Internal_Files/stability_plot.html", "Cluster Stability Analysis")
+            display_html_plot("Internal_Files/dendrogram_plot.html", "Cluster Dendrogram")
+
+        with tab_logs:
+
             st.subheader("Log / Text Output")
             if st.session_state.running_job_id:
-                st.info("Pipeline is running in the background... The log will appear here upon completion.")
+                st.info("Pipeline is running... The log will appear here upon completion.")
                 with st.spinner("Processing..."):
                     while st.session_state.active_thread and st.session_state.active_thread.is_alive():
                         time.sleep(0.5)
@@ -168,7 +252,9 @@ def main():
                 st.code(st.session_state.text_output, language='bash')
             elif not st.session_state.running_job_id:
                 st.info("Output from a pipeline run or file inspection will be shown here.")
+
         with tab_status:
+
             st.subheader("Live System Status")
             current_process = psutil.Process()
             if "monitoring" not in st.session_state: st.session_state.monitoring = False

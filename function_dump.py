@@ -8,6 +8,9 @@ import pandas as pd
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from Bio.SeqUtils.ProtParam import ProtParamData
 from propy import Autocorrelation
+import numpy as np
+import umap
+import hdbscan
 
 def prepare_charges_hydrophobicity(): #Better to keep things fresh at each run, rather than rely on a predefined dictionary
     aas = "ACDEFGHIKLMNPQRSTVWY"
@@ -288,3 +291,29 @@ def clear_dir(path: str):
             os.remove(full)
         elif os.path.isdir(full):
             shutil.rmtree(full)
+
+def hbdscan_cluster(coords_2d: np.ndarray, min_cluster_size: int = 10) -> np.ndarray:
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size)
+    labels = clusterer.fit_predict(coords_2d)
+    return labels
+
+def DBCV(coords_2d: np.ndarray) -> pd.DataFrame:
+    sizes = range(5, 31, 2)
+    scores = []
+    for size in sizes:
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=size,
+            gen_min_span_tree=True
+        ).fit(coords_2d)
+        score = clusterer.relative_validity_
+        scores.append({'min_cluster_size': size, 'dbcv_score': score})
+    return pd.DataFrame(scores)
+
+def UMAP(distance_matrix: np.ndarray) -> np.ndarray:
+    reducer = umap.UMAP(
+        n_components=2,
+        metric='precomputed',
+        random_state=42
+    )
+    coords_2d = reducer.fit_transform(distance_matrix)
+    return coords_2d

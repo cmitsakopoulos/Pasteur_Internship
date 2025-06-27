@@ -12,6 +12,9 @@ from sqlalchemy import create_engine
 from sqlalchemy import text
 from sqlalchemy.pool import NullPool
 from rapidfuzz import process, distance
+import plotly.graph_objects as go
+import plotly.figure_factory as ff
+import plotly.express as px
 
 from function_dump import (
     extractor,
@@ -21,6 +24,9 @@ from function_dump import (
     to_list,
     prefix,
     clear_dir,
+    hbdscan_cluster,
+    DBCV,
+    UMAP
 )
 
 #Separation of all application functions into steps, which are brought together in a recipe like way, to accomplish different tasks; aka chem, clean, or extract from version 1 (=version lame) of this program.
@@ -409,3 +415,170 @@ class LevenshteinDistance(Step):
         np.savez(output_filepath, matrix=distance_matrix, sequences=np.array(h3_sequences, dtype=object))
         self.logger.log("Save complete.")
         return data
+
+#Note I store the UMAP embedding on the distance matrix as parquet to avoid PreWalker conflicts with csv.
+#I prefer the user has to issue different recipes for each of the separate functions, as keep in mind I am working with 1.2k sequences, someone with 100k is ducked, the system might crash if it keeps resources too high for too long (running one step after the other nonstop).
+class GenerateUMAP(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data = data.copy()
+        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        embedding_filepath = os.path.join(internal_dir, 'umap_embedding.parquet')
+        plot_filepath = os.path.join(internal_dir, 'unclustered_umap_plot.html')
+        dist_matrix_filepath = os.path.join(internal_dir, 'h3_chain_dist_matrix.npz')
+
+        embedding_df = None
+
+        if os.path.exists(embedding_filepath):
+            self.logger.log(f"GenerateUMAP → Found cached embedding at {embedding_filepath}. Loading from file.")
+            embedding_df = pd.read_parquet(embedding_filepath)
+            new_data['umap_embedding'] = embedding_df
+            return new_data
+        else:
+            if not os.path.exists(dist_matrix_filepath):
+                self.logger.log(f"GenerateUMAP → Skipping: Distance matrix not found at {dist_matrix_filepath}")
+                return new_data
+
+            self.logger.log(f"GenerateUMAP → Loading distance matrix from {dist_matrix_filepath}")
+            loaded_data = np.load(dist_matrix_filepath, allow_pickle=True)
+            distance_matrix = loaded_data['matrix']
+            sequences = loaded_data['sequences']
+
+            self.logger.log("GenerateUMAP → Generating UMAP embedding...")
+            coords_2d = UMAP(distance_matrix)
+            
+            embedding_df = pd.DataFrame({
+                'sequence': sequences,
+                'umap_x': coords_2d[:, 0],
+                'umap_y': coords_2d[:, 1]
+            })
+            
+            embedding_df.to_parquet(embedding_filepath, index=False)
+            self.logger.log(f"GenerateUMAP → Saved new embedding to {embedding_filepath}")
+
+        new_data['umap_embedding'] = embedding_df
+        self.logger.log(f"GenerateUMAP → Complete. Added 'umap_embedding' DataFrame with {len(embedding_df)} rows.")
+        
+        self.logger.log("GenerateUMAP → Generating interactive unclustered plot...")
+        fig = px.scatter(
+            embedding_df,
+            x='umap_x',
+            y='umap_y',
+            hover_name='sequence',
+            title='Unclustered UMAP Projection of Sequences'
+        )
+        fig.update_traces(marker=dict(size=5, color='blue', opacity=0.7))
+        fig.update_layout(xaxis_title="UMAP Dimension 1", yaxis_title="UMAP Dimension 2")
+        fig.write_html(plot_filepath)
+        self.logger.log(f"GenerateUMAP → Saved interactive plot to {plot_filepath}")
+        
+        return new_data
+
+#HDBSCAN still needs the user to declare the minimum size for a cluster, but you cannot be sure of what the correct number should be if you dont know your data well; hyperpatametre tuning therefore is done here...
+class GetDensity(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data = data.copy()
+        if 'umap_embedding' not in new_data:
+            self.logger.log("GetDensity → Skipping: 'umap_embedding' data not found.")
+            return new_data
+
+        self.logger.log("GetDensity → Analysing HDBSCAN stability...")
+        embedding_df = new_data['umap_embedding']
+        coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
+        
+        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        stability_plot_path = os.path.join(internal_dir, 'stability_plot.html')
+
+        stability_df = DBCV(coords_2d)
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=stability_df['min_cluster_size'],
+            y=stability_df['dbcv_score'],
+            mode='lines+markers',
+            name='DBCV Score'
+        ))
+        fig.update_layout(
+            title='HDBSCAN Cluster Stability (Higher is Better)',
+            xaxis_title='Minimum Cluster Size',
+            yaxis_title='Relative Validity (DBCV Score)'
+        )
+        fig.write_html(stability_plot_path)
+        self.logger.log(f"GetDensity → Saved interactive stability plot to {stability_plot_path}")
+
+        best_size = stability_df.loc[stability_df['dbcv_score'].idxmax()]
+        self.logger.log(f"GetDensity → Analysis complete. Best score found:\n{best_size}")
+        
+        new_data['cluster_stability'] = stability_df
+        return new_data
+
+#Observe cluster aveues in form of dendrogram.
+class Dendrogram(Step):
+    def __init__(self, logger: FileLogger, min_cluster_size: int):
+        super().__init__(logger)
+        self.min_cluster_size = min_cluster_size
+
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data = data.copy()
+        if 'umap_embedding' not in new_data:
+            self.logger.log("Dendrogram → Skipping: 'umap_embedding' data not found.")
+            return new_data
+
+        self.logger.log(f"Dendrogram → Generating dendrogram with min_cluster_size={self.min_cluster_size}...")
+        embedding_df = new_data['umap_embedding']
+        coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
+        
+        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        tree_plot_path = os.path.join(internal_dir, 'dendrogram_plot.html')
+        
+        fig = ff.create_dendrogram(coords_2d, labels=embedding_df['sequence'].to_list())
+        fig.update_layout(title='Sequence Cluster Dendrogram')
+        fig.write_html(tree_plot_path)
+        self.logger.log(f"Dendrogram → Saved interactive dendrogram to {tree_plot_path}")
+        
+        return new_data
+
+class HDBSCAN(Step):
+    def __init__(self, logger: FileLogger, min_cluster_size: int):
+        super().__init__(logger)
+        if not isinstance(min_cluster_size, int) or min_cluster_size < 1:
+            raise ValueError("min_cluster_size must be an integer greater than 1.")
+        self.min_cluster_size = min_cluster_size
+
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        new_data = data.copy()
+        if 'umap_embedding' not in new_data:
+            self.logger.log("HDBSCAN → Skipping: 'umap_embedding' DataFrame not found.")
+            return new_data
+
+        self.logger.log(f"HDBSCAN → Clustering with min_cluster_size={self.min_cluster_size}")
+        embedding_df = new_data['umap_embedding'].copy()
+        coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
+
+        cluster_labels = hbdscan_cluster(coords_2d, self.min_cluster_size)
+        embedding_df['cluster_id'] = cluster_labels
+        new_data['umap_clusters'] = embedding_df
+
+        internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        interactive_plot_path = os.path.join(internal_dir, 'cluster_plot.html')
+        
+        fig = px.scatter(
+            embedding_df,
+            x='umap_x',
+            y='umap_y',
+            color=embedding_df['cluster_id'].astype(str),
+            hover_name='sequence',
+            color_discrete_map={'-1': 'lightgrey'},
+            title=f'HDBSCAN Clustering (min_cluster_size={self.min_cluster_size})'
+        )
+        fig.update_traces(marker=dict(size=5))
+        fig.update_layout(xaxis_title="UMAP 1", yaxis_title="UMAP 2")
+        fig.write_html(interactive_plot_path)
+
+        self.logger.log(f"HDBSCAN → Saved interactive plot to {interactive_plot_path}")
+        n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+        self.logger.log(f"HDBSCAN → Clustering complete. Found {n_clusters} clusters.")
+        
+        if 'umap_embedding' in new_data:
+             del new_data['umap_embedding']
+
+        return new_data
