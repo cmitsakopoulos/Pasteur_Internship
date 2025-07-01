@@ -19,5 +19,5 @@ Issue commands with the following logic (UNIX):
 
 Observe the figure below for a detailed explanation of the pipeline's capabilities and inner-workings:
 
-![pipeline_img](./Images/pipeline.png)
+![pipeline_img](./Images/pipeline_outline.png)
 
