@@ -72,7 +72,7 @@ def main():
     control_col, dashboard_col = st.columns((1, 2))
 
     with control_col:
-        st.image("logo.png", width=230 )
+        st.image("./Images/logo.png", width=230 )
         st.title("Control Panel")
 
         if st.session_state.running_job_id and st.session_state.active_thread:
