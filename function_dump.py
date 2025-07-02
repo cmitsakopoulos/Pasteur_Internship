@@ -136,19 +136,45 @@ def parser(df):
                 antigen_row['corresponding_pdb_antibody'] = f"{basic_dict.get('pdb_id')}"
             cdr_records.append(cdr_row)
             antigen_records.append(antigen_row)
-    else: #MODULATE THIS FOR NEW CSVS, CANNOT BE BOTHERED TO ACCOMODATE EVERY USE CASE; MAYBE IN THE FUTURE
+    else: #if not the NAstructural database stuff, then use user instructions produced by streamlit...
             cdr_records = []
             antigen_records = []
+            column_map = {}
+            try:
+                instructions_path = os.path.join(os.path.dirname(__file__), "Internal_Files", "csv_instructions.json")
+                with open(instructions_path, 'r') as f:
+                    column_map = json.load(f)
+            except FileNotFoundError:
+                comment = f"Warning: Instructions file not found at '{instructions_path}'. Proceeding without custom mapping."
+                raise comment
+            except json.JSONDecodeError:
+                comment_2 = f"Warning: Could not decode JSON from '{instructions_path}'. File may be corrupt."
+                raise comment_2
+
             for idx, new_row in df.iterrows():
                 cdr_row = {}
                 antigen_row = {}
-                antigen_row['corresponding_pdb_antibody'] = new_row['pdb_name']
-                cdr_row['pdb_id'] = new_row['pdb_name']
-                antigen_row["antigen_seq"] = new_row["antigen_sequence"]
-                cdr_row["h3_chain"] = new_row["heavy_cdr3"]
-                cdr_row['l3_chain'] = new_row["light_cdr3"]
-                cdr_row['database_origin'] = new_row["dataset"]
-                antigen_row['database_origin'] = new_row["dataset"]
+                
+                pdb_col = column_map.get('pdb_name')
+                pdb_val = new_row.get(pdb_col) if pdb_col else pd.NA
+                
+                dataset_col = column_map.get('dataset')
+                dataset_val = new_row.get(dataset_col) if dataset_col else "User Upload"
+
+                antigen_row['corresponding_pdb_antibody'] = pdb_val
+                cdr_row['pdb_id'] = pdb_val
+
+                antigen_seq_col = column_map.get('antigen_sequence')
+                cdr_h3_col = column_map.get('heavy_cdr3')
+                cdr_l3_col = column_map.get('light_cdr3')
+                
+                antigen_row["antigen_seq"] = new_row.get(antigen_seq_col) if antigen_seq_col else pd.NA
+                cdr_row["h3_chain"] = new_row.get(cdr_h3_col) if cdr_h3_col else pd.NA
+                cdr_row['l3_chain'] = new_row.get(cdr_l3_col) if cdr_l3_col else pd.NA
+
+                cdr_row['database_origin'] = dataset_val
+                antigen_row['database_origin'] = dataset_val
+                
                 cdr_row['heavy_taxonomy_id'] = pd.NA
                 cdr_row['heavy_host_organism_name'] = pd.NA
                 antigen_row['antigen_organism_name'] = pd.NA
@@ -160,6 +186,7 @@ def parser(df):
                 antigen_row['resolution'] = pd.NA
                 antigen_row['method'] = pd.NA
                 antigen_row['last_update'] = pd.NA
+                
                 cdr_records.append(cdr_row)
                 antigen_records.append(antigen_row)
     antigen_df = pd.DataFrame(antigen_records)
