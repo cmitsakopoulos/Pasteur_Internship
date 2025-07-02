@@ -178,9 +178,11 @@ class FlattenDuplicates(Step):
 
 class CleanUp(Step): #Connected to function in function dump, just cleans up the code here
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        current_log_file = self.logger.get_filename()
+        exception =os.path.basename(current_log_file)
         internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
         output_dir = os.path.join(os.path.dirname(__file__), "Computation_Deposit")
-        clear_dir(internal_dir)
+        clear_dir(internal_dir, exception)
         clear_dir(output_dir)
         data = {}
         return data
@@ -489,7 +491,7 @@ class GetDensity(Step):
             self.logger.log("GetDensity → Skipping: 'umap_embedding' data not found.")
             return new_data
 
-        self.logger.log("GetDensity → Analysing HDBSCAN stability...")
+        self.logger.log("GetDensity → Analysing HDBSCAN cluster stability...")
         embedding_df = new_data['umap_embedding']
         coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
         
@@ -507,7 +509,7 @@ class GetDensity(Step):
         ))
         fig.update_layout(
             title='HDBSCAN Cluster Stability (Higher is Better)',
-            xaxis_title='Minimum Cluster Size',
+            xaxis_title='Minimum Cluster Size (i.e. Stability)',
             yaxis_title='Relative Validity (DBCV Score)'
         )
         fig.write_html(stability_plot_path)

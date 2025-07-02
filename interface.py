@@ -22,7 +22,7 @@ This platform allows you to parse, process, and analyse Antibody-Antigen data, w
 
 st.header("Create read instructions")
 
-uploaded_file = st.file_uploader("Upload a sample of your CSV file", type="csv")
+uploaded_file = st.file_uploader("Upload a sample CSV file of your dataset", type="csv")
 
 if uploaded_file:
     try:

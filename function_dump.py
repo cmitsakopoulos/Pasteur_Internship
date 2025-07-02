@@ -145,10 +145,10 @@ def parser(df):
                 with open(instructions_path, 'r') as f:
                     column_map = json.load(f)
             except FileNotFoundError:
-                comment = f"Warning: Instructions file not found at '{instructions_path}'. Proceeding without custom mapping."
+                comment = f"Warning: Instructions file not found at '{instructions_path}'. Failing."
                 raise comment
             except json.JSONDecodeError:
-                comment_2 = f"Warning: Could not decode JSON from '{instructions_path}'. File may be corrupt."
+                comment_2 = f"Warning: Could not decode JSON from '{instructions_path}'. Failing."
                 raise comment_2
 
             for idx, new_row in df.iterrows():
@@ -159,7 +159,7 @@ def parser(df):
                 pdb_val = new_row.get(pdb_col) if pdb_col else pd.NA
                 
                 dataset_col = column_map.get('dataset')
-                dataset_val = new_row.get(dataset_col) if dataset_col else "User Upload"
+                dataset_val = new_row.get(dataset_col) if dataset_col else "User_Upload"
 
                 antigen_row['corresponding_pdb_antibody'] = pdb_val
                 cdr_row['pdb_id'] = pdb_val
@@ -309,10 +309,12 @@ def prefix(path):
         raise ValueError(f"SQL filename '{path.name}' missing numeric prefix")
     return int(m.group(1))
 
-def clear_dir(path: str):
+def clear_dir(path: str, exception=None):
     if not os.path.isdir(path):
         return
     for name in os.listdir(path):
+        if name == exception:
+            continue
         full = os.path.join(path, name)
         if os.path.isfile(full) or os.path.islink(full):
             os.remove(full)

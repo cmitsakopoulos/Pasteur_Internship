@@ -6,6 +6,7 @@ import os
 import threading
 from io import StringIO
 import contextlib
+from streamlit_autorefresh import st_autorefresh
 
 from database_pipeline import (
     FileLogger, Pipeline, Concatenation, CDRComputation, 
@@ -16,8 +17,7 @@ from database_pipeline import (
 from function_dump import inspect_summary, inspect_verbose
 
 RECIPES = {
-    "Standard": [CleanUp, PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation,
-        AssignIDs, ComputeRelationships, Write],
+    "Standard": [CleanUp, PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation, AssignIDs, ComputeRelationships, Write],
     "Rerun": [PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation,
         AssignIDs, ComputeRelationships, Write],
     "Distance Matrix": [PreWalker, Walker, Concatenation, LevenshteinDistance],
@@ -85,7 +85,7 @@ def main():
                         with open(log_filename, 'r', encoding='utf-8') as f:
                             st.session_state.text_output = f.read()
                         os.remove(log_filename)
-                        st.success("Pipeline run finished!")
+                        st.toast("Pipeline run finished!", icon="🕵️‍♂️")
                     except Exception as e:
                         st.error(f"Could not read or delete log file: {e}")
                 else:
@@ -93,16 +93,17 @@ def main():
 
                 st.session_state.running_job_id = None
                 st.session_state.active_thread = None
+        
+        is_running = bool(st.session_state.running_job_id) 
 
         with st.expander("**1. Process Raw Data**", expanded=False):
-            st.info("This pipeline processes raw experimental files into a structured format.")
             recipe = st.radio("Select Recipe", ('Standard', 'Rerun'),
                 captions=["Clears prior results and runs fresh.", "Runs on new files only."],
                 horizontal=True)
             path_run = st.text_input("Input Directory", value="./Internal_Files",
                 help="Specify the directory containing the raw data to be processed.")
 
-            if st.button("Execute Pipeline", type="primary", use_container_width=True):
+            if st.button("Execute Pipeline", type="primary", use_container_width=True, disabled=is_running):
                 if not st.session_state.running_job_id:
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
@@ -115,7 +116,7 @@ def main():
                 else:
                     st.warning("Another pipeline is already running.")
         
-        with st.expander("**2. Analysis & Visualisation**", expanded=False):
+        with st.expander("**2. Analysis**", expanded=False):
             st.info("Calculate sequence distances, generate visualisations, and perform clustering.")
             path_analysis = "./Internal_Files"
             abs_path_analysis = os.path.abspath(path_analysis)
@@ -123,7 +124,7 @@ def main():
             st.subheader("Stage 1: Pre-computation")
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Calculate Distance Matrix", use_container_width=True):
+                if st.button("Calculate Distance Matrix", use_container_width=True, disabled=is_running):
                     if not st.session_state.running_job_id:
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
@@ -134,7 +135,7 @@ def main():
                         st.info("Started distance matrix calculation.")
                     else: st.warning("Another pipeline is already running.")
             with col2:
-                if st.button("Generate UMAP Plot", use_container_width=True):
+                if st.button("Generate UMAP Plot", use_container_width=True, disabled=is_running):
                     if not st.session_state.running_job_id:
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
@@ -148,7 +149,7 @@ def main():
             st.divider()
             st.subheader("Stage 2: Clustering Analysis")
             
-            if st.button("Analyse Cluster Stability", use_container_width=True):
+            if st.button("Analyse Cluster Stability", use_container_width=True, disabled=is_running):
                 if not st.session_state.running_job_id:
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
@@ -165,7 +166,7 @@ def main():
             
             col3, col4 = st.columns(2)
             with col3:
-                if st.button("Generate Dendrogram", use_container_width=True):
+                if st.button("Generate Dendrogram", use_container_width=True, disabled=is_running):
                     if not st.session_state.running_job_id:
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
@@ -177,7 +178,7 @@ def main():
                         st.info("Started dendrogram generation.")
                     else: st.warning("Another pipeline is already running.")
             with col4:
-                if st.button("Perform HDBSCAN Clustering", type="primary", use_container_width=True):
+                if st.button("Perform HDBSCAN Clustering", type="primary", use_container_width=True, disabled=is_running):
                     if not st.session_state.running_job_id:
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
@@ -190,7 +191,6 @@ def main():
                     else: st.warning("Another pipeline is already running.")
 
         with st.expander("**3. Inspect a Data File**"):
-            st.info("Quickly analyze the contents and structure of any CSV file.")
             uploaded_file = st.file_uploader("Upload a data file for analysis", type=["csv"], help="Upload a processed or external CSV file.")
             col1, col2 = st.columns(2)
             with col1:
@@ -202,7 +202,7 @@ def main():
                             df = pd.read_csv(uploaded_file)
                             inspect_summary(df)
                         st.session_state.text_output = log_capture_string.getvalue()
-                        st.success("Quick summary generated.")
+                        st.toast("Summary in Logs", icon="🕵️‍♂️")
                     except Exception as e: st.error(f"Failed to generate summary: {e}")
             with col2:
                 if st.button("Detailed Analysis", use_container_width=True, disabled=not uploaded_file):
@@ -213,7 +213,7 @@ def main():
                             df = pd.read_csv(uploaded_file)
                             inspect_verbose(df)
                         st.session_state.text_output = log_capture_string.getvalue()
-                        st.success("Detailed analysis complete.")
+                        st.toast("Expanded View in Logs", icon="🕵️‍♂️")
                     except Exception as e: st.error(f"Failed to run analysis: {e}")
             if not uploaded_file: st.caption("Upload a file to enable inspection options.")
 
@@ -221,12 +221,33 @@ def main():
 
         st.header("Activity & Results")
 
-        def display_html_plot(path, header):
-            if os.path.exists(path):
-                st.subheader(header)
-                with open(path, 'r', encoding='utf-8') as f:
-                    html_content = f.read()
-                st.components.v1.html(html_content, height=500, scrolling=True)
+        if st.session_state.running_job_id:
+                st_autorefresh(interval=2000, key="global_refresher")
+                spinner_css = """
+                    <style>
+                    .spinner {
+                        border: 4px solid rgba(255, 255, 255, 0.3);
+                        border-left-color: #09ab3b; /* Streamlit's green */
+                        border-radius: 50%;
+                        width: 30px;
+                        height: 30px;
+                        animation: spin 1s linear infinite;
+                    }
+                    @keyframes spin {
+                        to {
+                            transform: rotate(360deg);
+                        }
+                    }
+                    </style>
+                    """
+                spinner_html = "<div class='spinner'></div>"
+
+                spinner_col, text_col = st.columns([1, 10])
+                with spinner_col:
+                    st.markdown(spinner_css + spinner_html, unsafe_allow_html=True)
+                with text_col:
+                    st.info("Pipeline is running in the background. This page will auto-refresh.")
+        
 
         tab_plots, tab_logs, tab_status = st.tabs(["Visualisations", "Logs", "Resources"])
         
@@ -255,63 +276,30 @@ def main():
                     st.components.v1.html(html_content, height=550, scrolling=True)
                 else:
                     st.warning(f"Plot '{plot_info['header']}' has not been generated yet. Please run the corresponding step in the 'Analysis & Visualisation' panel. Each graph in the drop down has its own step with which they are produced for stability purposes.")
-
         with tab_logs:
-
-            st.subheader("Log / Text Output")
-            if st.session_state.running_job_id:
-                st.info("Pipeline is running... The log will appear here upon completion.")
-                with st.spinner("Processing..."):
-                    while st.session_state.active_thread and st.session_state.active_thread.is_alive():
-                        time.sleep(0.5)
-                time.sleep(0.1)
-                st.rerun()
+            st.subheader("Operations Log")
             if st.session_state.text_output:
                 st.code(st.session_state.text_output, language='bash')
             elif not st.session_state.running_job_id:
                 st.info("Output from a pipeline run or file inspection will be shown here.")
+            else:
+                st.info("Job is in progress...")
 
         with tab_status:
+            st.subheader("System Resources Snapshot")
+            st.markdown("##### System-Wide Resources")
+            col1, col2 = st.columns(2)
+            with col1:
+                cpu_usage = psutil.cpu_percent()
+                st.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
+            with col2:
+                mem_info = psutil.virtual_memory()
+                st.metric(label="System RAM Usage", value=f"{(mem_info.total - mem_info.available) / (1024**3):.2f} GB")
 
-            st.subheader("Live System Status")
+            st.markdown("##### Application-Specific Resources")
             current_process = psutil.Process()
-            if "monitoring" not in st.session_state: st.session_state.monitoring = False
-            if st.button("Toggle Live Monitoring"):
-                st.session_state.monitoring = not st.session_state.monitoring
-                st.rerun() 
-            if st.session_state.monitoring:
-                st.success("Live monitoring is active.")
-                placeholder = st.empty()
-                while st.session_state.monitoring:
-                    with placeholder.container():
-                        st.markdown("##### System-Wide Resources")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            cpu_usage = psutil.cpu_percent()
-                            st.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
-                            st.progress(int(cpu_usage))
-                        with col2:
-                            mem_info = psutil.virtual_memory()
-                            st.metric(label="System RAM Usage", value=f"{(mem_info.total - mem_info.available) / (1024**3):.2f} GB / {mem_info.total / (1024**3):.2f} GB")
-                            st.progress(int(mem_info.percent))
-                        st.markdown("##### Application-Specific Resources")
-                        process_mem_mb = current_process.memory_info().rss / (1024**2)
-                        st.metric(label="App RAM Usage", value=f"{process_mem_mb:.2f} MB")
-                        st.caption("Represents the memory allocated to the Streamlit dashboard process (RSS).")
-                    time.sleep(1) 
-            else: 
-                st.info("Live monitoring is inactive. Displaying a static resource snapshot.")
-                st.markdown("##### System-Wide Resources")
-                col1, col2 = st.columns(2)
-                with col1:
-                    cpu_usage = psutil.cpu_percent()
-                    st.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
-                with col2:
-                    mem_info = psutil.virtual_memory()
-                    st.metric(label="System RAM Usage", value=f"{(mem_info.total - mem_info.available) / (1024**3):.2f} GB")
-                st.markdown("##### Application-Specific Resources")
-                process_mem_mb = current_process.memory_info().rss / (1024**2)
-                st.metric(label="App RAM Usage", value=f"{process_mem_mb:.2f} MB")
+            process_mem_mb = current_process.memory_info().rss / (1024**2)
+            st.metric(label="App RAM Usage", value=f"{process_mem_mb:.2f} MB")
 
 if __name__ == "__main__":
     main()
