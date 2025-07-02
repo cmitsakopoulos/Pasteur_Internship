@@ -317,3 +317,9 @@ def UMAP(distance_matrix: np.ndarray) -> np.ndarray:
     )
     coords_2d = reducer.fit_transform(distance_matrix)
     return coords_2d
+
+def merger_func(plot_df, cdr_df) -> pd.DataFrame:
+    merged_df = pd.merge(plot_df, cdr_df, on='h3_chain', how='left')
+    return merged_df
+
+

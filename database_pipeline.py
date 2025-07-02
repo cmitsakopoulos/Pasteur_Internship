@@ -26,7 +26,8 @@ from function_dump import (
     clear_dir,
     hbdscan_cluster,
     DBCV,
-    UMAP
+    UMAP,
+    merger_func
 )
 
 #Separation of all application functions into steps, which are brought together in a recipe like way, to accomplish different tasks; aka chem, clean, or extract from version 1 (=version lame) of this program.
@@ -95,9 +96,8 @@ class Write(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         output_dir = os.path.join(os.path.dirname(__file__), "Computation_Deposit")
         os.makedirs(output_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         for key, df in data.items():
-            filename = f"{key}_{ts}.csv"
+            filename = f"{key}.csv"
             filepath = os.path.join(output_dir, filename)
             df.to_csv(filepath, index=False)
             self.logger.log(f"Wrote DataFrame '{key}' to {filepath}")
@@ -422,50 +422,58 @@ class GenerateUMAP(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         new_data = data.copy()
         internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
+        storage_dir = os.path.join(os.path.dirname(__file__), "Computation_Deposit")
         embedding_filepath = os.path.join(internal_dir, 'umap_embedding.parquet')
         plot_filepath = os.path.join(internal_dir, 'unclustered_umap_plot.html')
         dist_matrix_filepath = os.path.join(internal_dir, 'h3_chain_dist_matrix.npz')
 
         embedding_df = None
 
+        for filename in os.listdir(storage_dir):
+            path_full_scanning = os.path.join(storage_dir, filename)
+            try:
+                file_key = Path(filename).stem
+                new_data[file_key] = pd.read_csv(path_full_scanning)
+            except Exception as e:
+                self.logger.log("Computation_Deposit is polluted, how on earth did you manage that? Delete trash and RERUN")
+                raise e
+
         if os.path.exists(embedding_filepath):
             self.logger.log(f"GenerateUMAP → Found cached embedding at {embedding_filepath}. Loading from file.")
             embedding_df = pd.read_parquet(embedding_filepath)
-            new_data['umap_embedding'] = embedding_df
-            return new_data
         else:
             if not os.path.exists(dist_matrix_filepath):
-                self.logger.log(f"GenerateUMAP → Skipping: Distance matrix not found at {dist_matrix_filepath}")
-                return new_data
+                self.logger.log(f"GenerateUMAP → Problem: Distance matrix not found at expected: {dist_matrix_filepath}")
+                raise FileNotFoundError(f"ERROR: Ensure to compute distances, nothing found at expected: {dist_matrix_filepath}")
 
             self.logger.log(f"GenerateUMAP → Loading distance matrix from {dist_matrix_filepath}")
             loaded_data = np.load(dist_matrix_filepath, allow_pickle=True)
-            distance_matrix = loaded_data['matrix']
-            sequences = loaded_data['sequences']
+            distance_matrix, sequences = loaded_data['matrix'], loaded_data['sequences']
 
             self.logger.log("GenerateUMAP → Generating UMAP embedding...")
             coords_2d = UMAP(distance_matrix)
             
             embedding_df = pd.DataFrame({
-                'sequence': sequences,
+                'h3_chain': sequences,
                 'umap_x': coords_2d[:, 0],
                 'umap_y': coords_2d[:, 1]
             })
-            
+
             embedding_df.to_parquet(embedding_filepath, index=False)
             self.logger.log(f"GenerateUMAP → Saved new embedding to {embedding_filepath}")
-
-        new_data['umap_embedding'] = embedding_df
+    
+        merged_df = merger_func(embedding_df, new_data["cdr"])
+        new_data['umap_embedding'] = merged_df
         self.logger.log(f"GenerateUMAP → Complete. Added 'umap_embedding' DataFrame with {len(embedding_df)} rows.")
         
         self.logger.log("GenerateUMAP → Generating interactive unclustered plot...")
         fig = px.scatter(
-            embedding_df,
+            merged_df, 
             x='umap_x',
             y='umap_y',
-            hover_name='sequence',
-            title='Unclustered UMAP Projection of Sequences'
-        )
+            hover_name='h3_chain',
+            hover_data=['pdb_id', 'heavy_host_organism_name'], 
+            title='Unclustered UMAP Projection of Sequences')
         fig.update_traces(marker=dict(size=5, color='blue', opacity=0.7))
         fig.update_layout(xaxis_title="UMAP Dimension 1", yaxis_title="UMAP Dimension 2")
         fig.write_html(plot_filepath)
