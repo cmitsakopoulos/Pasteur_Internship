@@ -11,6 +11,7 @@ from propy import Autocorrelation
 import numpy as np
 import umap
 import hdbscan
+from propy.PyPro import GetProDes
 
 def prepare_charges_hydrophobicity(): #Better to keep things fresh at each run, rather than rely on a predefined dictionary
     aas = "ACDEFGHIKLMNPQRSTVWY"
@@ -194,7 +195,7 @@ def parser(df):
     return antigen_df, cdr_df        
 
 def calculate_cdr_chars(df):
-    for column in ["h3_geary_hydrophobicity", "h3_blood_geary_charge", "h3_inflamed_geary_charge", "l3_blood_geary_charge", "l3_inflamed_geary_charge", "l3_geary_hydrophobicity"]:
+    for column in ["h3_geary_hydrophobicity", "h3_blood_geary_charge", "h3_inflamed_geary_charge", "l3_blood_geary_charge", "l3_inflamed_geary_charge", "l3_geary_hydrophobicity", "h3_ctd_array"]:
         df[column] = None
     dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity()
     for idx, row in df.iterrows():
@@ -215,6 +216,7 @@ def calculate_cdr_chars(df):
                 df.at[idx, 'h3_geary_hydrophobicity'] = hydrophobicity_h3
                 val = agn_3.isoelectric_point()
                 df.at[idx, 'h3_pi'] = float(f"{val:.5g}")
+                df.at[idx, "h3_ctd_array"] = np.array(GetProDes(clean_seq_h3).GetCTD())
                 df.at[idx, 'h3_blood_geary_charge'] = normal_h3
                 df.at[idx, 'h3_inflamed_geary_charge'] = inflamed_h3
                 df.at[idx, 'h3_is_incomplete']       = is_incomplete_3
@@ -261,7 +263,7 @@ def find_N_glycosilation(seq):
     return count
 
 def calculate_antigen_chars(df):#Copy of the antibody related chemical chars function
-    for column in  ["antigen_geary_hydrophobicity", "antigen_blood_geary_charge", "antigen_inflamed_geary_charge"]:
+    for column in  ["antigen_geary_hydrophobicity", "antigen_blood_geary_charge", "antigen_inflamed_geary_charge", "ant_ctd_array"]:
         df[column] = None
     dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity() #Why not call it in the Step class which handles this function? Antigen/CDR are handled separate, therefore no difference in running it here or the separate Step(s)
     for idx, row in df.iterrows():
@@ -278,6 +280,7 @@ def calculate_antigen_chars(df):#Copy of the antibody related chemical chars fun
                 print(f"Row {idx}: failed to analyze antigen ({e})")
             else:
                 inflamed_ant, normal_ant, hydrophobicity_ant = calc_autocorrelations_mini(clean_seq, dict_normal, dict_inflamed, dict_hydro)
+                df.at["ant_ctd_array"] = np.array(GetProDes(clean_seq).GetCTD())
                 df.at[idx, 'antigen_geary_hydrophobicity'] = hydrophobicity_ant
                 val = agn.isoelectric_point()
                 df.at[idx, 'antigen_pi'] = float(f"{val:.5g}")

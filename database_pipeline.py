@@ -540,7 +540,7 @@ class Dendrogram(Step):
         internal_dir = os.path.join(os.path.dirname(__file__), "Internal_Files")
         tree_plot_path = os.path.join(internal_dir, 'dendrogram_plot.html')
         
-        fig = ff.create_dendrogram(coords_2d, labels=embedding_df['sequence'].to_list())
+        fig = ff.create_dendrogram(coords_2d, labels=embedding_df['h3_chain'].to_list())
         fig.update_layout(title='Sequence Cluster Dendrogram')
         fig.write_html(tree_plot_path)
         self.logger.log(f"Dendrogram → Saved interactive dendrogram to {tree_plot_path}")
@@ -576,7 +576,8 @@ class HDBSCAN(Step):
             x='umap_x',
             y='umap_y',
             color=embedding_df['cluster_id'].astype(str),
-            hover_name='sequence',
+            hover_name='h3_chain',
+            hover_data= ['pdb_id', 'heavy_host_organism_name'],
             color_discrete_map={'-1': 'lightgrey'},
             title=f'HDBSCAN Clustering (min_cluster_size={self.min_cluster_size})'
         )
