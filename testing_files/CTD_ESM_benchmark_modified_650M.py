@@ -4,6 +4,7 @@ import umap
 import plotly.express as px
 from scipy.spatial import procrustes
 import torch
+import os
 
 from propy.PyPro import GetProDes
 from Bio.Align import PairwiseAligner
@@ -120,6 +121,6 @@ for i in range(len(mtx1)):
     )
 
 fig.update_layout(xaxis_title="Dimension 1", yaxis_title="Dimension 2")
-output_filename = "procrustes_comparison_plot_650M.html"
+output_filename = os.path.join("procrustes_comparison_plot_650M.html")
 fig.write_html(output_filename)
 print(f"Aligned comparison plot saved successfully to '{output_filename}'.")
