@@ -99,22 +99,15 @@ Introduced new function to check for the dataframe "health", if it is from the p
 then continue correctly.
 """
 def parser(df):
-    parsed_cdr_cols = {'h3_chain', 'l3_chain', 'pdb_id'}
-    parsed_antigen_cols = {'antigen_seq', 'database_origin', "last_update", "heavy_host_organism_name"}
-    if parsed_cdr_cols.issubset(df.columns):
-        print("Skipping nascent parsing, DataFrame already contains CDR columns.")
-        empty_antigen_df = pd.DataFrame(...)
-        return empty_antigen_df, df
-
-    if parsed_antigen_cols.issubset(df.columns):
-        print("Skipping nascent parsing, DataFrame already contains Antigen columns.")
-        empty_cdr_df = pd.DataFrame(...)
-        return df, empty_cdr_df
+    # The redundant checks for pre-parsed formats are removed.
+    # This function now only expects new, unprocessed data.
     
     cdr_records = []
     antigen_records = []
-    if 'basic' in df.columns: # IF IDIOSYNCRATIC
+
+    if 'basic' in df.columns: # Handles the idiosyncratic format
         for idx, basic_dict in enumerate(df.get('basic', [])):
+            # ... (this part of the logic remains unchanged)
             cdr_row = {}
             antigen_row = {}
             if isinstance(basic_dict, dict):
@@ -133,70 +126,59 @@ def parser(df):
                 antigen_row['resolution'] = basic_dict.get('resolution')
                 antigen_row['method'] = basic_dict.get('method')
                 antigen_row['last_update'] = basic_dict.get('last_update')
-                # Split the combined l3_h3 string into separate chains
                 l3_h3 = basic_dict.get('l3_h3', '')
-                parts = l3_h3.split('_', 1) #max one split
+                parts = l3_h3.split('_', 1)
                 cdr_row['l3_chain'] = parts[0] if len(parts) > 0 else None
                 cdr_row['h3_chain'] = parts[1] if len(parts) > 1 else None
                 antigen_row['corresponding_pdb_antibody'] = f"{basic_dict.get('pdb_id')}"
             cdr_records.append(cdr_row)
             antigen_records.append(antigen_row)
-    else: #if not the NAstructural database stuff, then use user instructions produced by streamlit...
-            cdr_records = []
-            antigen_records = []
-            column_map = {}
-            try:
-                instructions_path = os.path.join(os.path.dirname(__file__), "Internal_Files", "csv_instructions.json")
-                with open(instructions_path, 'r') as f:
-                    column_map = json.load(f)
-            except FileNotFoundError:
-                comment = f"Warning: Instructions file not found at '{instructions_path}'. Failing."
-                raise comment
-            except json.JSONDecodeError:
-                comment_2 = f"Warning: Could not decode JSON from '{instructions_path}'. Failing."
-                raise comment_2
-
-            for idx, new_row in df.iterrows():
-                cdr_row = {}
-                antigen_row = {}
-                
-                pdb_col = column_map.get('pdb_name')
-                pdb_val = new_row.get(pdb_col) if pdb_col else pd.NA
-                
-                dataset_col = column_map.get('dataset')
-                dataset_val = new_row.get(dataset_col) if dataset_col else "User_Upload"
-
-                antigen_row['corresponding_pdb_antibody'] = pdb_val
-                cdr_row['pdb_id'] = pdb_val
-
-                antigen_seq_col = column_map.get('antigen_sequence')
-                cdr_h3_col = column_map.get('heavy_cdr3')
-                cdr_l3_col = column_map.get('light_cdr3')
-                
-                antigen_row["antigen_seq"] = new_row.get(antigen_seq_col) if antigen_seq_col else pd.NA
-                cdr_row["h3_chain"] = new_row.get(cdr_h3_col) if cdr_h3_col else pd.NA
-                cdr_row['l3_chain'] = new_row.get(cdr_l3_col) if cdr_l3_col else pd.NA
-
-                cdr_row['database_origin'] = dataset_val
-                antigen_row['database_origin'] = dataset_val
-                
-                cdr_row['heavy_taxonomy_id'] = pd.NA
-                cdr_row['heavy_host_organism_name'] = pd.NA
-                antigen_row['antigen_organism_name'] = pd.NA
-                antigen_row['antigen_host_organism'] = pd.NA
-                antigen_row['antigen_taxonomy_id'] = pd.NA
-                cdr_row['resolution'] = pd.NA
-                cdr_row['method'] = pd.NA
-                cdr_row['last_update'] = pd.NA
-                antigen_row['resolution'] = pd.NA
-                antigen_row['method'] = pd.NA
-                antigen_row['last_update'] = pd.NA
-                
-                cdr_records.append(cdr_row)
-                antigen_records.append(antigen_row)
+    else: 
+        column_map = {}
+        try:
+            instructions_path = INTERNAL_FILES_DIR / "csv_instructions.json"
+            with open(instructions_path, 'r') as f:
+                column_map = json.load(f)
+        except FileNotFoundError:
+            comment = f"Warning: Instructions file not found at '{instructions_path}'. Failing."
+            raise FileNotFoundError(comment)
+        except json.JSONDecodeError:
+            comment_2 = f"Warning: Could not decode JSON from '{instructions_path}'. Failing."
+            raise ValueError(comment_2) 
+        for idx, new_row in df.iterrows():
+            cdr_row = {}
+            antigen_row = {}
+            pdb_col = column_map.get('pdb_name')
+            pdb_val = new_row.get(pdb_col) if pdb_col else pd.NA
+            dataset_col = column_map.get('dataset')
+            dataset_val = new_row.get(dataset_col) if dataset_col else "User_Upload"
+            antigen_row['corresponding_pdb_antibody'] = pdb_val
+            cdr_row['pdb_id'] = pdb_val
+            antigen_seq_col = column_map.get('antigen_sequence')
+            cdr_h3_col = column_map.get('heavy_cdr3')
+            cdr_l3_col = column_map.get('light_cdr3')
+            antigen_row["antigen_seq"] = new_row.get(antigen_seq_col) if antigen_seq_col else pd.NA
+            cdr_row["h3_chain"] = new_row.get(cdr_h3_col) if cdr_h3_col else pd.NA
+            cdr_row['l3_chain'] = new_row.get(cdr_l3_col) if cdr_l3_col else pd.NA
+            cdr_row['database_origin'] = dataset_val
+            antigen_row['database_origin'] = dataset_val
+            cdr_row['heavy_taxonomy_id'] = pd.NA
+            cdr_row['heavy_host_organism_name'] = pd.NA
+            antigen_row['antigen_organism_name'] = pd.NA
+            antigen_row['antigen_host_organism'] = pd.NA
+            antigen_row['antigen_taxonomy_id'] = pd.NA
+            cdr_row['resolution'] = pd.NA
+            cdr_row['method'] = pd.NA
+            cdr_row['last_update'] = pd.NA
+            antigen_row['resolution'] = pd.NA
+            antigen_row['method'] = pd.NA
+            antigen_row['last_update'] = pd.NA
+            cdr_records.append(cdr_row)
+            antigen_records.append(antigen_row)
+            
     antigen_df = pd.DataFrame(antigen_records)
     cdr_df = pd.DataFrame(cdr_records)
-    return antigen_df, cdr_df        
+    return antigen_df, cdr_df      
 
 def calculate_cdr_chars(df):
     for column in ["h3_geary_hydrophobicity", "h3_blood_geary_charge", "h3_inflamed_geary_charge", "l3_blood_geary_charge", "l3_inflamed_geary_charge", "l3_geary_hydrophobicity", "h3_ctd_array"]:
@@ -284,7 +266,7 @@ def calculate_antigen_chars(df):#Copy of the antibody related chemical chars fun
                 print(f"Row {idx}: failed to analyze antigen ({e})")
             else:
                 inflamed_ant, normal_ant, hydrophobicity_ant = calc_autocorrelations_mini(clean_seq, dict_normal, dict_inflamed, dict_hydro)
-                df.at["ant_ctd_array"] = np.array(GetProDes(clean_seq).GetCTD())
+                df.at[idx, "ant_ctd_array"] = np.array(GetProDes(clean_seq).GetCTD())
                 df.at[idx, 'antigen_geary_hydrophobicity'] = hydrophobicity_ant
                 val = agn.isoelectric_point()
                 df.at[idx, 'antigen_pi'] = float(f"{val:.5g}")

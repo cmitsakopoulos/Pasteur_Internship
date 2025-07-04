@@ -111,8 +111,10 @@ def render_dashboard_page():
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
                     st.session_state.running_job_id = job_id
-                    abs_path = os.path.abspath(path_run)
-                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, recipe, abs_path))
+
+                    clean_path = path_run.strip().strip('"') #learned this the hard way
+
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, recipe, clean_path))
                     st.session_state.active_thread = thread
                     thread.start()
                     st.info(f"Started '{recipe}' pipeline in the background.")

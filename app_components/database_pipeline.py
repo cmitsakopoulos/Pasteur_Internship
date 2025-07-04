@@ -73,24 +73,19 @@ class Step(ABC): #Parent class to be method overrriden by specialised children
 
 class Concatenation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        cdr_frames = []
-        antigen_frames = []
-        for key, df in data.items():
-            if key.startswith('cdr_'):
-                cdr_frames.append(df)
-            elif key.startswith('antigen_'):
-                antigen_frames.append(df)
-        result: Dict[str, pd.DataFrame] = {}
+        cdr_frames = [pd.read_csv(f) for f in INTERNAL_FILES_DIR.glob('*_cdr.csv')]
+        antigen_frames = [pd.read_csv(f) for f in INTERNAL_FILES_DIR.glob('*_antigen.csv')]
+        result: Dict[str, pd.DataFrame] = {}       
         if cdr_frames:
             result['cdr'] = pd.concat(cdr_frames, ignore_index=True)
         else:
             result['cdr'] = pd.DataFrame()
-            self.logger.log("No CDRS, moving on")
+            self.logger.log("No CDR files found to concatenate.")
         if antigen_frames:
             result['antigen'] = pd.concat(antigen_frames, ignore_index=True)
         else:
             result['antigen'] = pd.DataFrame()
-            self.logger.log("No Antigens, moving on")
+            self.logger.log("No Antigen files found to concatenate.")
         self.logger.log(f"Concatenation → output keys: {list(result.keys())}")
         return result
 
@@ -190,29 +185,31 @@ class PreWalker(Step):
         self.input_path = Path(input_path)
 
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        input_files = list(self.input_path.rglob("*.csv"))
+        # This step's only job is now to find NEW source files to process.
+        if not self.input_path.is_dir():
+            self.logger.log(f"PreWalker → Input path '{self.input_path}' is not a valid directory. Stopping.")
+            data["paths"] = []
+            return data
+
+        all_csvs = {f.resolve() for f in self.input_path.rglob("*.csv")}
+        
+        # Determine which files have already been processed by checking outputs
+        processed_stems = set()
         if INTERNAL_FILES_DIR.is_dir():
-            processed_stems = {p.stem for p in INTERNAL_FILES_DIR.rglob("*.csv")}
-            tasks_to_be = [
-                str(f.resolve())
-                for f in input_files
-                if f.stem not in processed_stems
-            ]
-            dropped = len(list(INTERNAL_FILES_DIR.glob('*.csv')))
-            data["paths"] = tasks_to_be
-            self.logger.log(f"Dropped {dropped} already-processed files; {len(tasks_to_be)} remain.")
-            for p in INTERNAL_FILES_DIR.rglob("*.csv"):
-                stem = p.stem.lower()
-                df = pd.read_csv(p)
-                if "antigen" in stem:
-                    data[f"antigen_{stem}"] = df
-                elif "cdr" in stem:
-                    data[f"cdr_{stem}"] = df
-        else:
-            data["paths"] = [str(f.resolve()) for f in input_files]
+            for f in INTERNAL_FILES_DIR.glob('*_antigen.csv'):
+                processed_stems.add(f.stem.replace('_antigen', ''))
+            for f in INTERNAL_FILES_DIR.glob('*_cdr.csv'):
+                processed_stems.add(f.stem.replace('_cdr', ''))
+
+        tasks_to_be = [
+            str(f) for f in all_csvs if f.stem not in processed_stems
+        ]
+        
+        data["paths"] = tasks_to_be
+        self.logger.log(f"PreWalker → Found {len(tasks_to_be)} new files to process.")
         return data
-    
-#Named after the os import function "walk", traverses user provided directory to build our shared dict, which is then parsed further...
+
+#Re wrote the following piece of shit, it was causing me headaches before
 class Walker(Step):
     @staticmethod
     def _process_file(args):
@@ -220,25 +217,26 @@ class Walker(Step):
         df_raw = extractor(filepath)
         antigen_df, cdr_df = parser(df_raw)
         return filepath, idx, antigen_df, cdr_df
+        
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = {}
         tasks = []
         INTERNAL_FILES_DIR.mkdir(exist_ok=True)
-        for idx, filepath in enumerate(data["paths"], start=1):
+        for idx, filepath in enumerate(data.get("paths", []), start=1):
             tasks.append((filepath, idx))
+        if not tasks:
+            self.logger.log("Walker → No new files to process.")
+            return {} 
         with ProcessPoolExecutor(max_workers=2) as executor:
             for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
                 base_key = Path(filepath).stem
                 if not antigen_df.empty:
-                    new_data[f"antigen_{base_key}"] = antigen_df
                     filename_agn = f"{base_key}_antigen.csv"
-                    filepath_agn = os.path.join(INTERNAL_FILES_DIR, filename_agn)
+                    filepath_agn = INTERNAL_FILES_DIR / filename_agn
                     antigen_df.to_csv(filepath_agn, index=False)
                     self.logger.log(f"Wrote Antigen DataFrame from '{base_key}' to {filepath_agn}")
                 if not cdr_df.empty:
-                    new_data[f"cdr_{base_key}"] = cdr_df
                     filename_abd = f"{base_key}_cdr.csv"
-                    filepath_abd = os.path.join(INTERNAL_FILES_DIR, filename_abd)
+                    filepath_abd = INTERNAL_FILES_DIR / filename_abd
                     cdr_df.to_csv(filepath_abd, index=False)
                     self.logger.log(f"Wrote CDR DataFrame from '{base_key}' to {filepath_abd}")
                 self.logger.log(
@@ -246,10 +244,7 @@ class Walker(Step):
                     f"antigen rows={antigen_df.shape[0]}, "
                     f"cdr rows={cdr_df.shape[0]}"
                 )
-        for key, df in data.items(): #Without it the dataframes were being nuked...
-            if key != 'paths' and key not in new_data:
-                new_data[key] = df
-        return new_data
+        return {}
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
 class RmPurificationTags(Step):
