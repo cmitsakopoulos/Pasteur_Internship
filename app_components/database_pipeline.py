@@ -73,21 +73,26 @@ class Step(ABC): #Parent class to be method overrriden by specialised children
 
 class Concatenation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        cdr_frames = [pd.read_csv(f) for f in INTERNAL_FILES_DIR.glob('*_cdr.csv')]
-        antigen_frames = [pd.read_csv(f) for f in INTERNAL_FILES_DIR.glob('*_antigen.csv')]
-        result: Dict[str, pd.DataFrame] = {}       
-        if cdr_frames:
-            result['cdr'] = pd.concat(cdr_frames, ignore_index=True)
+        all_cdr_frames = [pd.read_csv(f) for f in INTERNAL_FILES_DIR.glob('*_cdr.csv')]
+        all_antigen_frames = [pd.read_csv(f) for f in INTERNAL_FILES_DIR.glob('*_antigen.csv')]
+
+        final_data: Dict[str, pd.DataFrame] = {}
+
+        if all_cdr_frames:
+            final_data['cdr'] = pd.concat(all_cdr_frames, ignore_index=True)
+            self.logger.log(f"Concatenation → Final CDR DataFrame has {len(final_data['cdr'])} rows.")
         else:
-            result['cdr'] = pd.DataFrame()
-            self.logger.log("No CDR files found to concatenate.")
-        if antigen_frames:
-            result['antigen'] = pd.concat(antigen_frames, ignore_index=True)
+            final_data['cdr'] = pd.DataFrame()
+            self.logger.log("Concatenation → No CDR data found.")
+        
+        if all_antigen_frames:
+            final_data['antigen'] = pd.concat(all_antigen_frames, ignore_index=True)
+            self.logger.log(f"Concatenation → Final Antigen DataFrame has {len(final_data['antigen'])} rows.")
         else:
-            result['antigen'] = pd.DataFrame()
-            self.logger.log("No Antigen files found to concatenate.")
-        self.logger.log(f"Concatenation → output keys: {list(result.keys())}")
-        return result
+            final_data['antigen'] = pd.DataFrame()
+            self.logger.log("Concatenation → No Antigen data found.")
+            
+        return final_data
 
 class Write(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
@@ -185,28 +190,29 @@ class PreWalker(Step):
         self.input_path = Path(input_path)
 
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        # This step's only job is now to find NEW source files to process.
         if not self.input_path.is_dir():
-            self.logger.log(f"PreWalker → Input path '{self.input_path}' is not a valid directory. Stopping.")
+            self.logger.log(f"PreWalker → Input path '{self.input_path}' is not a valid directory.")
             data["paths"] = []
             return data
 
-        all_csvs = {f.resolve() for f in self.input_path.rglob("*.csv")}
-        
-        # Determine which files have already been processed by checking outputs
-        processed_stems = set()
-        if INTERNAL_FILES_DIR.is_dir():
-            for f in INTERNAL_FILES_DIR.glob('*_antigen.csv'):
-                processed_stems.add(f.stem.replace('_antigen', ''))
-            for f in INTERNAL_FILES_DIR.glob('*_cdr.csv'):
-                processed_stems.add(f.stem.replace('_cdr', ''))
+        processed_stems = {f.stem.replace('_antigen', '').replace('_cdr', '') for f in INTERNAL_FILES_DIR.glob('*.csv')}
+        self.logger.log(f"PreWalker → Found {len(processed_stems)} stems from previously processed files.")
 
-        tasks_to_be = [
-            str(f) for f in all_csvs if f.stem not in processed_stems
-        ]
-        
-        data["paths"] = tasks_to_be
-        self.logger.log(f"PreWalker → Found {len(tasks_to_be)} new files to process.")
+        all_csv_files_in_path = {f.resolve() for f in self.input_path.rglob("*.csv")}
+
+        new_source_files = []
+        for file in all_csv_files_in_path:
+
+            if file.name.endswith(('_cdr.csv', '_antigen.csv')):
+                continue
+
+            if file.stem in processed_stems:
+                continue
+
+            new_source_files.append(str(file))
+
+        data["paths"] = new_source_files
+        self.logger.log(f"PreWalker → Found {len(new_source_files)} new source files to process.")
         return data
 
 #Re wrote the following piece of shit, it was causing me headaches before
@@ -219,32 +225,35 @@ class Walker(Step):
         return filepath, idx, antigen_df, cdr_df
         
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        tasks = []
-        INTERNAL_FILES_DIR.mkdir(exist_ok=True)
-        for idx, filepath in enumerate(data.get("paths", []), start=1):
-            tasks.append((filepath, idx))
-        if not tasks:
-            self.logger.log("Walker → No new files to process.")
-            return {} 
-        with ProcessPoolExecutor(max_workers=2) as executor:
-            for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
-                base_key = Path(filepath).stem
-                if not antigen_df.empty:
-                    filename_agn = f"{base_key}_antigen.csv"
-                    filepath_agn = INTERNAL_FILES_DIR / filename_agn
-                    antigen_df.to_csv(filepath_agn, index=False)
-                    self.logger.log(f"Wrote Antigen DataFrame from '{base_key}' to {filepath_agn}")
-                if not cdr_df.empty:
-                    filename_abd = f"{base_key}_cdr.csv"
-                    filepath_abd = INTERNAL_FILES_DIR / filename_abd
-                    cdr_df.to_csv(filepath_abd, index=False)
-                    self.logger.log(f"Wrote CDR DataFrame from '{base_key}' to {filepath_abd}")
-                self.logger.log(
-                    f"Walker → processed {filepath!r}: "
-                    f"antigen rows={antigen_df.shape[0]}, "
-                    f"cdr rows={cdr_df.shape[0]}"
-                )
-        return {}
+            tasks = []
+            INTERNAL_FILES_DIR.mkdir(exist_ok=True)
+            for idx, filepath_str in enumerate(data.get("paths", []), start=1):
+                if filepath_str.endswith('_cdr.csv') or filepath_str.endswith('_antigen.csv'):
+                    self.logger.log(f"Walker → Skipping already-parsed file: {os.path.basename(filepath_str)}")
+                    continue
+                tasks.append((filepath_str, idx))
+            if not tasks:
+                self.logger.log("Walker → No new files to process, HEADACHE")
+                return {} 
+            with ProcessPoolExecutor(max_workers=2) as executor:
+                for filepath, idx, antigen_df, cdr_df in executor.map(self._process_file, tasks):
+                    base_key = Path(filepath).stem
+                    if not antigen_df.empty:
+                        filename_agn = f"{base_key}_antigen.csv"
+                        filepath_agn = INTERNAL_FILES_DIR / filename_agn
+                        antigen_df.to_csv(filepath_agn, index=False)
+                        self.logger.log(f"Wrote Antigen DataFrame from '{base_key}' to {filepath_agn}")
+                    if not cdr_df.empty:
+                        filename_abd = f"{base_key}_cdr.csv"
+                        filepath_abd = INTERNAL_FILES_DIR / filename_abd
+                        cdr_df.to_csv(filepath_abd, index=False)
+                        self.logger.log(f"Wrote CDR DataFrame from '{base_key}' to {filepath_abd}")
+                    self.logger.log(
+                        f"Walker → processed {filepath!r}: "
+                        f"antigen rows={antigen_df.shape[0]}, "
+                        f"cdr rows={cdr_df.shape[0]}"
+                    )
+            return {}
 
 #Offering a simple to implement solution to a complicated issue: remove purification tags from antigenic sequences no matter if they are alone or in groups or whatever.
 class RmPurificationTags(Step):

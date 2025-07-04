@@ -75,7 +75,7 @@ def render_dashboard_page():
     control_col, dashboard_col = st.columns((1, 2))
 
     with control_col:
-        st.image("./Images/logo.png", width=230 )
+        st.image("./Images/logo.png", width=230)
         st.title("Control Panel")
 
         if st.session_state.running_job_id and st.session_state.active_thread:
@@ -122,7 +122,6 @@ def render_dashboard_page():
                     st.warning("Another pipeline is already running.")
         
         with st.expander("**2. Analysis**", expanded=False):
-            st.info("Calculate sequence distances, generate visualisations, and perform clustering.")
             path_analysis = str(INTERNAL_FILES_DIR)
 
             st.subheader("Stage 1: Pre-computation")
@@ -133,7 +132,7 @@ def render_dashboard_page():
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
                         st.session_state.running_job_id = job_id
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", abs_path_analysis))
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", path_analysis))
                         st.session_state.active_thread = thread
                         thread.start()
                         st.info("Started distance matrix calculation.")
@@ -144,7 +143,7 @@ def render_dashboard_page():
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
                         st.session_state.running_job_id = job_id
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Generate Scatter Plot", abs_path_analysis))
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Generate Scatter Plot", path_analysis))
                         st.session_state.active_thread = thread
                         thread.start()
                         st.info("Started UMAP generation.")
@@ -158,7 +157,7 @@ def render_dashboard_page():
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
                     st.session_state.running_job_id = job_id
-                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Identify MinClusterNum", abs_path_analysis))
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Identify MinClusterNum", path_analysis))
                     st.session_state.active_thread = thread
                     thread.start()
                     st.info("Started stability analysis.")
@@ -176,7 +175,7 @@ def render_dashboard_page():
                         job_id = f"job_{time.time()}"
                         st.session_state.running_job_id = job_id
                         params = {'min_cluster_size': min_size}
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Dendrogram", abs_path_analysis, params))
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Dendrogram", path_analysis, params))
                         st.session_state.active_thread = thread
                         thread.start()
                         st.info("Started dendrogram generation.")
@@ -188,7 +187,7 @@ def render_dashboard_page():
                         job_id = f"job_{time.time()}"
                         st.session_state.running_item_id = job_id
                         params = {'min_cluster_size': min_size}
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Perform Clustering", abs_path_analysis, params))
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Perform Clustering", path_analysis, params))
                         st.session_state.active_thread = thread
                         thread.start()
                         st.info("Started HDBSCAN clustering.")
