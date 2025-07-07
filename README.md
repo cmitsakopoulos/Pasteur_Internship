@@ -7,7 +7,14 @@ This project analyses the polyreactive behaviour of Natural Antibodies (NAbs) to
 
 # Pipeline GUI
 
-GIFs demonstrating use will be added soon.
+In this version you are greeted with a welcome on which you can select a number of columns from your source data files; columns to include in the platform's standardised analysis format. The column to the left of your webpage will give you the option to shift between the different components of the platform: namely, between the welcome page-issuing instructions-and the analysis dashboard on which all of the analysis takes place. 
+
+### Welcome Page
+![welcome_page](./Images/welcome_page_early.png)
+### Projection of distance matrix to space
+![umap_projection](./Images/distance_comp_projection.png)
+### Clustering upon distance projection
+![cluster_example](./Images/clustering_early.png)
 
 # Pipeline CLI
 
