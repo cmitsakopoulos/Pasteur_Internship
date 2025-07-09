@@ -1,8 +1,8 @@
 import os
 import datetime
-import time
 from concurrent.futures import ProcessPoolExecutor
 import re
+import ast
 from abc import ABC, abstractmethod
 from typing import Dict
 import pandas as pd
@@ -11,10 +11,15 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy import text
 from sqlalchemy.pool import NullPool
-from rapidfuzz import process, distance
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import pairwise_distances
+from Bio.Align import PairwiseAligner, substitution_matrices
 import plotly.graph_objects as go
 import plotly.figure_factory as ff
 import plotly.express as px
+import snf
+from scipy.linalg import eigh
+from itertools import product
 
 from app_components.function_dump import (
     extractor,
@@ -62,7 +67,6 @@ class Pipeline: #Receives a "recipe"/list of Step subclasses needed to produce a
         data: Dict[str, pd.DataFrame] = {}
         for step in self.steps:
             data = step.process(data)
-            check_dataframe_integrity(data, step.__class__.__name__)
         return data
 
 class Step(ABC): #Parent class to be method overrriden by specialised children
@@ -392,92 +396,183 @@ class WorkWithDatabase(Step):
         self.logger.log("WorkWithDatabase → all DDL applied and data loaded.")
         return data
     
-class LevenshteinDistance(Step):
+class ComputeDistanceMatrices(Step):
+    def _calculate_blosum_score(self, seq1: str, seq2: str) -> float:
+        aligner = PairwiseAligner()
+        aligner.substitution_matrix = substitution_matrices.load("BLOSUM45")
+        aligner.open_gap_score = -10.0
+        aligner.extend_gap_score = -1.0
+        try:
+            return aligner.score(seq1, seq2)
+        except Exception:
+            return 0.0
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        os.makedirs(INTERNAL_FILES_DIR, exist_ok=True)
-        output_filepath = os.path.join(INTERNAL_FILES_DIR, 'h3_chain_dist_matrix.npz')
-        dataframe = data["cdr"]
-        h3_sequences = dataframe["h3_chain"].tolist()
-        self.logger.log(f"Extracted {len(h3_sequences)} unique sequences from 'h3_chain' column.")
-        self.logger.log("Calculating pairwise distance matrix...")
-        start_time = time.time()
-        distance_matrix = process.cdist(
-            h3_sequences,
-            h3_sequences,
-            scorer=distance.Levenshtein.distance,
-            workers=-1
-        )
-        end_time = time.time()
-        self.logger.log(f"Matrix calculation finished in {end_time - start_time:.4f} seconds.")
-        self.logger.log(f"Shape of the distance matrix: {distance_matrix.shape}")
-        self.logger.log(f"Saving matrix to '{output_filepath}'...")
-        np.savez(output_filepath, matrix=distance_matrix, sequences=np.array(h3_sequences, dtype=object))
-        self.logger.log("Save complete.")
+        self.logger.log("ComputeDistanceMatrices → Starting...")
+        if 'cdr' not in data or data['cdr'].empty:
+            self.logger.log("ComputeDistanceMatrices → SKIPPING: 'cdr' DataFrame not found or is empty.")
+            return data
+
+        cdr_df = data['cdr']
+        ctd_path = INTERNAL_FILES_DIR / 'ctd_dist_matrix.npz'
+        blosum_path = INTERNAL_FILES_DIR / 'blosum_dist_matrix.npz'
+
+        if 'h3_ctd' not in cdr_df.columns:
+            self.logger.log("ComputeDistanceMatrices → SKIPPING CTD: 'h3_ctd' column not found.")
+        elif ctd_path.exists():
+            self.logger.log(f"ComputeDistanceMatrices → Found cached CTD matrix. Loading from {ctd_path}.")
+            loaded_data = np.load(ctd_path)
+            data['ctd_dist_matrix'] = loaded_data['matrix']
+        else:
+            self.logger.log("ComputeDistanceMatrices → No CTD cache. Processing distances...")
+            try:
+                sequences = cdr_df["h3_chain"].to_numpy(dtype=object)
+                ctd_vectors = cdr_df['h3_ctd'].apply(ast.literal_eval).tolist()
+                feature_matrix = np.array(ctd_vectors)
+                scaler = StandardScaler()
+                scaled_features = scaler.fit_transform(feature_matrix)
+                ctd_dist_matrix = pairwise_distances(scaled_features, metric='manhattan')
+                np.savez(ctd_path, matrix=ctd_dist_matrix, sequences=sequences)
+                self.logger.log(f"ComputeDistanceMatrices → Saved new CTD distance matrix to {ctd_path}.")
+                data['ctd_dist_matrix'] = ctd_dist_matrix
+            except Exception as e:
+                self.logger.log(f"ComputeDistanceMatrices → ERROR processing CTD distances: {e}")
+        if blosum_path.exists():
+            self.logger.log(f"ComputeDistanceMatrices → Found cached BLOSUM matrix. Loading from {blosum_path}.")
+            loaded_data = np.load(blosum_path)
+            data['blosum_dist_matrix'] = loaded_data['matrix']
+        else:
+            self.logger.log("ComputeDistanceMatrices → No BLOSUM cache. Processing distances...")
+            try:
+                sequences = cdr_df['h3_chain'].tolist()
+                num_sequences = len(sequences)
+                blosum_similarity_matrix = np.zeros((num_sequences, num_sequences))
+                for i in range(num_sequences):
+                    for j in range(i, num_sequences):
+                        score = self._calculate_blosum_score(sequences[i], sequences[j])
+                        blosum_similarity_matrix[i, j] = blosum_similarity_matrix[j, i] = score
+                
+                max_blosum_score = np.max(blosum_similarity_matrix)
+                blosum_dist_matrix = max_blosum_score - blosum_similarity_matrix
+                np.savez(blosum_path, matrix=blosum_dist_matrix, sequences=np.array(sequences, dtype=object))
+                self.logger.log(f"ComputeDistanceMatrices → Saved new BLOSUM distance matrix to {blosum_path}.")
+                data['blosum_dist_matrix'] = blosum_dist_matrix
+            except Exception as e:
+                self.logger.log(f"ComputeDistanceMatrices → ERROR processing BLOSUM distances: {e}")
+
+        self.logger.log("ComputeDistanceMatrices → Finished.")
         return data
 
 #Note I store the UMAP embedding on the distance matrix as parquet to avoid PreWalker conflicts with csv.
 #I prefer the user has to issue different recipes for each of the separate functions, as keep in mind I am working with 1.2k sequences, someone with 100k is ducked, the system might crash if it keeps resources too high for too long (running one step after the other nonstop).
-class GenerateUMAP(Step):
+
+class TuneSNFParameters(Step):
+    def __init__(self, logger: FileLogger, k_range: list = [10, 20, 30], mu_range: list = [0.3, 0.5, 0.8]):
+        super().__init__(logger)
+        self.k_range = k_range
+        self.mu_range = mu_range
+
+    def _calculate_eigengap(self, affinity_matrix: np.ndarray, num_eig: int = 10) -> float:
+        diag = np.sum(affinity_matrix, axis=1)
+        diag[diag == 0] = 1e-9 
+        D_inv_sqrt = np.diag(1.0 / np.sqrt(diag))
+        L = np.eye(affinity_matrix.shape[0]) - D_inv_sqrt @ affinity_matrix @ D_inv_sqrt
+        eigenvalues = eigh(L, eigvals_only=True, subset_by_index=[0, num_eig-1])
+        eigenvalues.sort()
+        return np.max(np.diff(eigenvalues))
+
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data = data.copy()
-        embedding_filepath = os.path.join(INTERNAL_FILES_DIR, 'umap_embedding.parquet')
-        plot_filepath = os.path.join(INTERNAL_FILES_DIR, 'unclustered_umap_plot.html')
-        dist_matrix_filepath = os.path.join(INTERNAL_FILES_DIR, 'h3_chain_dist_matrix.npz')
-
-        embedding_df = None
-
-        for filename in os.listdir(COMPUTATION_DIR):
-            path_full_scanning = os.path.join(COMPUTATION_DIR, filename)
-            try:
-                file_key = Path(filename).stem
-                new_data[file_key] = pd.read_csv(path_full_scanning)
-            except Exception as e:
-                self.logger.log("Computation_Deposit is polluted, how on earth did you manage that? Delete trash and RERUN")
-                raise e
-
-        if os.path.exists(embedding_filepath):
-            self.logger.log(f"GenerateUMAP → Found cached embedding at {embedding_filepath}. Loading from file.")
-            embedding_df = pd.read_parquet(embedding_filepath)
-        else:
-            if not os.path.exists(dist_matrix_filepath):
-                self.logger.log(f"GenerateUMAP → Problem: Distance matrix not found at expected: {dist_matrix_filepath}")
-                raise FileNotFoundError(f"ERROR: Ensure to compute distances, nothing found at expected: {dist_matrix_filepath}")
-
-            self.logger.log(f"GenerateUMAP → Loading distance matrix from {dist_matrix_filepath}")
-            loaded_data = np.load(dist_matrix_filepath, allow_pickle=True)
-            distance_matrix, sequences = loaded_data['matrix'], loaded_data['sequences']
-
-            self.logger.log("GenerateUMAP → Generating UMAP embedding...")
-            coords_2d = UMAP(distance_matrix)
-            
-            embedding_df = pd.DataFrame({
-                'h3_chain': sequences,
-                'umap_x': coords_2d[:, 0],
-                'umap_y': coords_2d[:, 1]
-            })
-
-            embedding_df.to_parquet(embedding_filepath, index=False)
-            self.logger.log(f"GenerateUMAP → Saved new embedding to {embedding_filepath}")
-    
-        merged_df = merger_func(embedding_df, new_data["cdr"])
-        new_data['umap_embedding'] = merged_df
-        self.logger.log(f"GenerateUMAP → Complete. Added 'umap_embedding' DataFrame with {len(embedding_df)} rows.")
+        self.logger.log("TuneSNFParameters → Starting hyperparameter tuning for SNF.")
+        if 'ctd_dist_matrix' not in data or 'blosum_dist_matrix' not in data:
+            self.logger.log("TuneSNFParameters → SKIPPING: Required distance matrices not found.")
+            return data
+        best_score = -1
+        best_params = {}
+        param_grid = list(product(self.k_range, self.mu_range))
+        self.logger.log(f"TuneSNFParameters → Testing {len(param_grid)} parameter combinations...")
+        for k, mu in param_grid:
+            affinity_ctd = snf.compute.affinity_matrix(data['ctd_dist_matrix'], K=k, mu=mu)
+            affinity_blosum = snf.compute.affinity_matrix(data['blosum_dist_matrix'], K=k, mu=mu)
+            fused_matrix = snf.snf([affinity_ctd, affinity_blosum], K=k)
+            score = self._calculate_eigengap(fused_matrix)
+            self.logger.log(f"TuneSNFParameters → Tested K={k}, mu={mu}. Score (Eigen-gap): {score:.4f}")
+            if score > best_score:
+                best_score = score
+                best_params = {'K': k, 'mu': mu}
         
-        self.logger.log("GenerateUMAP → Generating interactive unclustered plot...")
+        self.logger.log(f"TuneSNFParameters → Tuning complete. Best parameters found: {best_params} with score {best_score:.4f}")
+        data['best_snf_params'] = best_params
+        return data
+    
+class FuseAndProject(Step):
+    def __init__(self, logger: FileLogger, k_neighbors: int = 20, mu_param: float = 0.5):
+        super().__init__(logger)
+        self.k_neighbors = k_neighbors
+        self.mu_param = mu_param
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        self.logger.log("FuseAndProject → Starting network fusion and projection.")
+
+        if 'best_snf_params' in data:
+            self.logger.log(f"FuseAndProject → Using tuned SNF parameters: {data['best_snf_params']}")
+            self.k_neighbors = data['best_snf_params']['K']
+            self.mu_param = data['best_snf_params']['mu']
+        else:
+            self.logger.log(f"FuseAndProject → Using default SNF parameters: K={self.k_neighbors}, mu={self.mu_param}")
+
+        if 'ctd_dist_matrix' not in data or 'blosum_dist_matrix' not in data:
+            self.logger.log("FuseAndProject → SKIPPING: Required distance matrices not found in data dictionary.")
+            return data
+        fused_matrix_path = INTERNAL_FILES_DIR / 'fused_affinity_matrix.npz'
+        plot_filepath = INTERNAL_FILES_DIR / 'snf_umap_projection.html'
+
+        if fused_matrix_path.exists():
+            self.logger.log(f"FuseAndProject → Found cached fused matrix. Loading from {fused_matrix_path}.")
+            loaded_data = np.load(fused_matrix_path)
+            fused_affinity_matrix = loaded_data['matrix']
+        else:
+            self.logger.log("FuseAndProject → No cache found. Creating and fusing affinity matrices...")
+            ctd_dist = data['ctd_dist_matrix']
+            blosum_dist = data['blosum_dist_matrix']
+
+            affinity_ctd = snf.compute.affinity_matrix(ctd_dist, K=self.k_neighbors, mu=self.mu_param)
+            affinity_blosum = snf.compute.affinity_matrix(blosum_dist, K=self.k_neighbors, mu=self.mu_param)
+            
+            fused_affinity_matrix = snf.snf([affinity_ctd, affinity_blosum], K=self.k_neighbors)
+            np.savez(fused_matrix_path, matrix=fused_affinity_matrix)
+            self.logger.log(f"FuseAndProject → Saved new fused affinity matrix to {fused_matrix_path}.")
+    
+        data['fused_affinity_matrix'] = fused_affinity_matrix
+        self.logger.log("FuseAndProject → Added 'fused_affinity_matrix' to data dictionary for clustering.")
+
+        self.logger.log("FuseAndProject → Generating UMAP embedding from fused network...")
+        fused_distance_matrix = 1 - fused_affinity_matrix
+        coords_2d = UMAP(fused_distance_matrix) 
+
+        embedding_df = pd.DataFrame({
+            'h3_chain': data['cdr']['h3_chain'],
+            'umap_x': coords_2d[:, 0],
+            'umap_y': coords_2d[:, 1]
+        })
+
+        merged_df = merger_func(embedding_df, data["cdr"]) 
+        data['snf_embedding'] = merged_df
+        self.logger.log(f"FuseAndProject → Complete. Added 'snf_embedding' DataFrame with {len(merged_df)} rows.")
+
+        self.logger.log("FuseAndProject → Generating interactive plot...")
         fig = px.scatter(
             merged_df, 
             x='umap_x',
             y='umap_y',
             hover_name='h3_chain',
             hover_data=['pdb_id', 'heavy_host_organism_name'], 
-            title='Unclustered UMAP Projection of Sequences')
-        fig.update_traces(marker=dict(size=5, color='blue', opacity=0.7))
+            title='UMAP Projection of Fused CTD and BLOSUM Networks'
+        )
+        fig.update_traces(marker=dict(size=5, opacity=0.8))
         fig.update_layout(xaxis_title="UMAP Dimension 1", yaxis_title="UMAP Dimension 2")
         fig.write_html(plot_filepath)
-        self.logger.log(f"GenerateUMAP → Saved interactive plot to {plot_filepath}")
+        self.logger.log(f"FuseAndProject → Saved interactive plot to {plot_filepath}")
         
-        return new_data
-
+        return data
+    
 #HDBSCAN still needs the user to declare the minimum size for a cluster, but you cannot be sure of what the correct number should be if you dont know your data well; hyperpatametre tuning therefore is done here...
 class GetDensity(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:

@@ -7,7 +7,6 @@ import threading
 from io import StringIO
 import contextlib
 from streamlit_autorefresh import st_autorefresh
-from streamlit_option_menu import option_menu
 from streamlit_extras.metric_cards import style_metric_cards
 from streamlit_extras.colored_header import colored_header
 from app_components.config import IMAGES_DIR, INTERNAL_FILES_DIR
@@ -15,8 +14,8 @@ from app_components.config import IMAGES_DIR, INTERNAL_FILES_DIR
 from app_components.database_pipeline import (
     FileLogger, Pipeline, Concatenation, CDRComputation, 
     AntigenComputation, FlattenDuplicates, Write, RmPurificationTags, 
-    AssignIDs, ComputeRelationships, WorkWithDatabase, CleanUp, 
-    PreWalker, LevenshteinDistance, Walker, GetDensity, GenerateUMAP, Dendrogram, HDBSCAN,
+    AssignIDs, ComputeRelationships, CleanUp, 
+    PreWalker, Walker, GetDensity, Dendrogram, HDBSCAN, ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject
 )
 from app_components.function_dump import inspect_summary, inspect_verbose
 
@@ -24,11 +23,11 @@ RECIPES = {
     "Standard": [CleanUp, PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation, AssignIDs, ComputeRelationships, Write],
     "Rerun": [PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation,
         AssignIDs, ComputeRelationships, Write],
-    "Distance Matrix": [PreWalker, Walker, Concatenation, LevenshteinDistance],
-    "Generate Scatter Plot": [GenerateUMAP],
-    "Identify MinClusterNum": [GenerateUMAP, GetDensity],
-    "Dendrogram": [GenerateUMAP, Dendrogram],
-    "Perform Clustering": [GenerateUMAP, HDBSCAN]
+    "Distance Matrix": [PreWalker, Walker, Concatenation, ComputeDistanceMatrices],
+    "Generate Scatter Plot": [TuneSNFParameters, FuseAndProject],
+    "Identify MinClusterNum": [GetDensity],
+    "Dendrogram": [Dendrogram],
+    "Perform Clustering": [HDBSCAN]
 }
 
 def build_pipeline(recipe: str, path: str, logger: FileLogger, params: dict = None) -> Pipeline:
