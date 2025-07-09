@@ -2,28 +2,18 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+import ast
 from Bio.Align import PairwiseAligner, substitution_matrices
-from propy import CTD
 from sklearn.metrics import pairwise_distances
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
+import snf
+import umap
+import plotly.express as px
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
 from app_components.config import COMPUTATION_DIR
-
-def compute_ctd_vector(sequence: str) -> np.ndarray:
-    if not isinstance(sequence, str) or len(sequence) < 2:
-        return np.array([])
-    try:
-        c_features = CTD.CalculateC(sequence)
-        t_features = CTD.CalculateT(sequence)
-        d_features = CTD.CalculateD(sequence)
-        all_features = {**c_features, **t_features, **d_features}
-        return np.array(list(all_features.values()))
-    except Exception as e:
-        print(f"Error computing CTD for sequence '{sequence}': {e}")
-        return np.array([])
 
 def calculate_blosum_score(seq1: str, seq2:str) -> float:
     aligner = PairwiseAligner()
@@ -37,42 +27,62 @@ def calculate_blosum_score(seq1: str, seq2:str) -> float:
         return 0.0
 
 df_main = pd.read_csv(os.path.join(COMPUTATION_DIR, "cdr.csv"))
-df_main.dropna(subset=['h3_chain'], inplace=True)
+df_main.dropna(subset=['h3_chain', 'h3_ctd'], inplace=True)
 df_main = df_main.head(100).reset_index(drop=True)
 
-print("-> Calculating CTD vectors for each sequence...")
-df_main['ctd_vector'] = df_main['h3_chain'].apply(compute_ctd_vector)
+print("-> Parsing pre-computed CTD vectors...")
+# This safely evaluates the string representation of the list into an actual list
+df_main['ctd_vector'] = df_main['h3_ctd'].apply(ast.literal_eval)
+ctd_feature_matrix = np.array(df_main['ctd_vector'].tolist())
 
-df_filtered = df_main[df_main['ctd_vector'].apply(len) > 0].reset_index(drop=True)
+print("-> Standardizing CTD features...")
+scaler = StandardScaler()
+scaled_ctd_features = scaler.fit_transform(ctd_feature_matrix)
 
-if df_filtered.empty:
-    print("\nError: No valid CTD vectors were generated. Halting execution.")
-    print("Please check the output above for errors from the 'compute_ctd_vector' function.")
-    sys.exit(1)
+print("-> Computing CTD distance matrix...")
+ctd_distance_matrix = pairwise_distances(scaled_ctd_features, metric='manhattan')
 
-ctd_feature_matrix = np.vstack(df_filtered['ctd_vector'].values)
-
-print("-> Computing Manhattan distance matrix from CTD vectors...")
-ctd_distance_matrix = pairwise_distances(ctd_feature_matrix, metric='manhattan')
-
-print("-> Calculating pairwise BLOSUM similarity matrix...")
-num_sequences = len(df_filtered)
-sequences = df_filtered['h3_chain'].tolist()
+print("-> Calculating BLOSUM similarity matrix...")
+sequences = df_main['h3_chain'].tolist()
+num_sequences = len(sequences)
 blosum_similarity_matrix = np.zeros((num_sequences, num_sequences))
-
 for i in range(num_sequences):
     for j in range(i, num_sequences):
         score = calculate_blosum_score(sequences[i], sequences[j])
         blosum_similarity_matrix[i, j] = blosum_similarity_matrix[j, i] = score
 
-print("-> Converting BLOSUM similarity to distance and normalizing with MinMaxScaler...")
-blosum_distance_matrix = np.max(blosum_similarity_matrix) - blosum_similarity_matrix
+print("-> Preparing affinity matrices for SNF...")
+affinity_matrices = snf.make_affinity(
+    [blosum_similarity_matrix, ctd_distance_matrix],
+    metric=['affinity', 'distance']
+)
 
-scaler = MinMaxScaler()
-normalized_blosum_distance_matrix = scaler.fit_transform(blosum_distance_matrix)
+print("-> Fusing networks using SNF...")
+fused_affinity_matrix = snf.snf(affinity_matrices, K=20)
 
+print("-> Projecting fused affinity matrix into 2D space using UMAP...")
+fused_distance_matrix = 1 - fused_affinity_matrix
+umap_reducer = umap.UMAP(n_components=2, metric='precomputed', random_state=42)
+embedding_2d = umap_reducer.fit_transform(fused_distance_matrix)
 
-print("\n--- Computation Complete ---")
-print(f"Shape of CTD Manhattan Distance Matrix: {ctd_distance_matrix.shape}")
-print(f"Shape of Normalized BLOSUM Distance Matrix: {normalized_blosum_distance_matrix.shape}")
-print(f"Data filtered to {num_sequences} sequences with valid features.")
+print("-> Generating interactive plot...")
+plot_df = pd.DataFrame(embedding_2d, columns=['UMAP1', 'UMAP2'])
+plot_df['h3_chain'] = sequences
+
+fig = px.scatter(
+    plot_df,
+    x='UMAP1',
+    y='UMAP2',
+    hover_name='h3_chain',
+    title='UMAP Projection of SNF Fused Similarity Network'
+)
+fig.update_traces(marker=dict(size=8))
+fig.update_layout(
+    xaxis_title="UMAP Component 1",
+    yaxis_title="UMAP Component 2"
+)
+
+output_filename = "snf_projection.html"
+fig.write_html(output_filename)
+print(f"\n--- Computation Complete ---")
+print(f"Interactive plot saved successfully to '{output_filename}'.")

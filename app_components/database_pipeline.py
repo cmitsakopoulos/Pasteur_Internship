@@ -62,8 +62,9 @@ class Pipeline: #Receives a "recipe"/list of Step subclasses needed to produce a
         data: Dict[str, pd.DataFrame] = {}
         for step in self.steps:
             data = step.process(data)
+            check_dataframe_integrity(data, step.__class__.__name__)
         return data
-    
+
 class Step(ABC): #Parent class to be method overrriden by specialised children
     def __init__(self, logger: FileLogger):
         self.logger = logger
@@ -106,26 +107,23 @@ class Write(Step):
         return {}
 
 #CHEMICAL CHARACTERISTICS
+
 class CDRComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = data.copy()
-        if 'cdr' in new_data:
-            computation_cdr_df = new_data["cdr"]
-            calculate_cdr_chars(computation_cdr_df)
-            new_data['cdr'] = computation_cdr_df
-        if 'cdr' in new_data:
-            self.logger.log(f"CDRComputation → processed cdr, rows: {new_data['cdr'].shape[0]}")
+        new_data = data.copy()
+        if 'cdr' in new_data and not new_data['cdr'].empty:
+            self.logger.log("CDRComputation → Starting...")
+            new_data['cdr'] = calculate_cdr_chars(new_data['cdr'])
+            self.logger.log(f"CDRComputation → Processed 'cdr', final shape: {new_data['cdr'].shape}")
         return new_data
 
 class AntigenComputation(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data: Dict[str, pd.DataFrame] = data.copy()
-        if 'antigen' in data:
-            computation_antigen_df = new_data["antigen"]
-            calculate_antigen_chars(computation_antigen_df)
-            new_data['antigen'] = computation_antigen_df
-        if 'antigen' in new_data:
-            self.logger.log(f"AntigenComputation → processed antigen, rows: {new_data['antigen'].shape[0]}")
+        new_data = data.copy()
+        if 'antigen' in new_data and not new_data['antigen'].empty:
+            self.logger.log("AntigenComputation → Starting...")
+            new_data['antigen'] = calculate_antigen_chars(new_data['antigen'])
+            self.logger.log(f"AntigenComputation → Processed 'antigen', final shape: {new_data['antigen'].shape}")
         return new_data
 #CHEMICAL CHARACTERISTICS
 

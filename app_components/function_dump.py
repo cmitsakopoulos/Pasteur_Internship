@@ -6,46 +6,14 @@ import re
 import shutil
 import pandas as pd
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
-from Bio.SeqUtils.ProtParam import ProtParamData
-from propy import Autocorrelation
 import numpy as np
 import umap
 import hdbscan
 from propy.PyPro import GetProDes
 
+
 from app_components.config import INTERNAL_FILES_DIR
 
-def prepare_charges_hydrophobicity(): #Better to keep things fresh at each run, rather than rely on a predefined dictionary
-    aas = "ACDEFGHIKLMNPQRSTVWY"
-    aa_list = [i for i in aas]
-    net_charge_at_pH735 = {}
-    net_charge_at_pH550 = {}
-    hydrophobicity_scale = {}
-    for index in aa_list:
-        aa_prep = ProteinAnalysis(index)
-        net_charge_at_pH735[index] = aa_prep.charge_at_pH(7.35)
-        net_charge_at_pH550[index] = aa_prep.charge_at_pH(5.5)
-        hydrophobicity_scale[index] = ProtParamData.kd[index]
-    return net_charge_at_pH550, net_charge_at_pH735, hydrophobicity_scale
-
-def calc_autocorrelations_mini(seq, blood_geary_charge: dict, inflamed_geary_charge: dict, hydrophobicity_scale: dict):
-    #Remember the precalculated dicts above (def prepare_charges_hydrophobicity)?
-    ph735 = Autocorrelation.CalculateEachGearyAuto(
-        seq,
-        blood_geary_charge,
-        "net_charges",
-    )
-    ph550 = Autocorrelation.CalculateEachGearyAuto(
-        seq,
-        inflamed_geary_charge,
-        "net_charges"
-    )
-    hydrophobicity = Autocorrelation.CalculateEachGearyAuto(
-        seq,
-        hydrophobicity_scale,
-        "hydrophobicity"
-    )
-    return list(ph550.values()), list(ph735.values()), list(hydrophobicity.values())
 #For visual purposes, Ive split the functions into a separate file so that it is easier to debug...only personal, literally-obviously zero difference...
 
 csv.field_size_limit(500_000_000)
@@ -94,20 +62,12 @@ def extractor(filepath):
                 records.append(parsed)
     return pd.DataFrame(records)
 
-"""
-Introduced new function to check for the dataframe "health", if it is from the pipeline, 
-then continue correctly.
-"""
 def parser(df):
-    # The redundant checks for pre-parsed formats are removed.
-    # This function now only expects new, unprocessed data.
-    
     cdr_records = []
     antigen_records = []
 
     if 'basic' in df.columns: # Handles the idiosyncratic format
         for idx, basic_dict in enumerate(df.get('basic', [])):
-            # ... (this part of the logic remains unchanged)
             cdr_row = {}
             antigen_row = {}
             if isinstance(basic_dict, dict):
@@ -180,60 +140,36 @@ def parser(df):
     cdr_df = pd.DataFrame(cdr_records)
     return antigen_df, cdr_df      
 
-def calculate_cdr_chars(df):
-    for column in ["h3_geary_hydrophobicity", "h3_blood_geary_charge", "h3_inflamed_geary_charge", "l3_blood_geary_charge", "l3_inflamed_geary_charge", "l3_geary_hydrophobicity", "h3_ctd_array"]:
-        df[column] = None
-    dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity()
-    for idx, row in df.iterrows():
-        # Heavy chain CDR3
-        h3_seq = row.get('h3_chain')
-        if not h3_seq:
-            print(f"Row {idx} has no H3 sequence.")
-            return None
-        else:
-            is_incomplete_3 = int('X' in h3_seq)
-            clean_seq_h3     = h3_seq.replace('X', '')
-            try:
-                agn_3 = ProteinAnalysis(clean_seq_h3)
-            except Exception as e:
-                print(f"Row {idx}: failed to analyze antigen ({e})")
-            else:
-                inflamed_h3, normal_h3, hydrophobicity_h3 = calc_autocorrelations_mini(clean_seq_h3, dict_normal, dict_inflamed, dict_hydro)
-                df.at[idx, 'h3_geary_hydrophobicity'] = hydrophobicity_h3
-                val = agn_3.isoelectric_point()
-                df.at[idx, 'h3_pi'] = float(f"{val:.5g}")
-                df.at[idx, "h3_ctd_array"] = np.array(GetProDes(clean_seq_h3).GetCTD())
-                df.at[idx, 'h3_blood_geary_charge'] = normal_h3
-                df.at[idx, 'h3_inflamed_geary_charge'] = inflamed_h3
-                df.at[idx, 'h3_is_incomplete']       = is_incomplete_3
-                df.at[idx, "h3_n_glycosilation_sites"] = find_N_glycosilation(h3_seq)
-                df.at[idx, "h3_o_glycosilation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
-                df.at[idx, "h3_chain"] = clean_seq_h3
+def calculate_cdr_chars(df: pd.DataFrame) -> pd.DataFrame:
 
-        # Light chain CDR3
-        l3_seq = row.get('l3_chain')
-        if not l3_seq:
-            print(f"Row {idx} has no L3 sequence.")
-        else:
-            is_incomplete_2 = int('X' in l3_seq)
-            clean_seq_l3     = l3_seq.replace('X', '')
-            try:
-                agn_2 = ProteinAnalysis(clean_seq_l3)
-            except Exception as e:
-                print(f"Row {idx}: failed to analyze light chain ({e})")
-            else:
-                inflamed_l3, normal_l3, hydrophobicity_l3 = calc_autocorrelations_mini(clean_seq_l3, dict_normal, dict_inflamed, dict_hydro)
-                df.at[idx, 'l3_geary_hydrophobicity'] = hydrophobicity_l3
+    df_out = df.copy()
 
-                val = agn_2.isoelectric_point()
-                df.at[idx, 'l3_pi'] = float(f"{val:.5g}")
-                df.at[idx, 'l3_blood_geary_charge'] = normal_l3
-                df.at[idx, 'l3_inflamed_geary_charge'] = inflamed_l3
-                df.at[idx, 'l3_is_incomplete']       = is_incomplete_2
-                df.at[idx, "l3_n_glycosilation_sites"] = find_N_glycosilation(l3_seq)
-                df.at[idx, "l3_o_glycosilation_sites"] = len(re.findall(r'(?=(?:[ST]{3}))(?!P)', h3_seq))
-                df.at[idx, "l3_chain"] = clean_seq_l3
-    return df
+    if 'h3_chain' in df_out.columns:
+        h3_original = df_out['h3_chain'].dropna()
+        h3_clean = h3_original.str.replace('X', '')
+        
+        df_out['h3_is_incomplete'] = h3_original.str.contains('X').astype(int)
+        df_out['h3_pi'] = h3_clean.apply(lambda s: ProteinAnalysis(s).isoelectric_point())
+        df_out['h3_ctd'] = h3_clean.apply(compute_ctd_vector)
+        df_out['h3_n_glycosilation_sites'] = h3_original.apply(find_N_glycosilation)
+        df_out['h3_o_glycosilation_sites'] = h3_original.apply(
+            lambda s: len(re.findall(r'(?=(?:[ST]{3}))(?!P)', s)) if isinstance(s, str) else 0
+        )
+        df_out['h3_chain'] = h3_clean
+
+    if 'l3_chain' in df_out.columns:
+        l3_original = df_out['l3_chain'].dropna()
+        l3_clean = l3_original.str.replace('X', '')
+        df_out['l3_is_incomplete'] = l3_original.str.contains('X').astype(int)
+        df_out['l3_pi'] = l3_clean.apply(lambda s: ProteinAnalysis(s).isoelectric_point())
+        df_out['l3_n_glycosilation_sites'] = l3_original.apply(find_N_glycosilation)
+        df_out['l3_o_glycosilation_sites'] = l3_original.apply(
+            lambda s: len(re.findall(r'(?=(?:[ST]{3}))(?!P)', s)) if isinstance(s, str) else 0
+        )
+        df_out['l3_chain'] = l3_clean
+
+    return df_out
+
 
 # O(n) complexity algorithm, I will not concede to the re automated functions
 def find_N_glycosilation(seq):
@@ -248,33 +184,18 @@ def find_N_glycosilation(seq):
             i += 1
     return count
 
-def calculate_antigen_chars(df):#Copy of the antibody related chemical chars function
-    for column in  ["antigen_geary_hydrophobicity", "antigen_blood_geary_charge", "antigen_inflamed_geary_charge", "ant_ctd_array"]:
-        df[column] = None
-    dict_inflamed, dict_normal, dict_hydro = prepare_charges_hydrophobicity() #Why not call it in the Step class which handles this function? Antigen/CDR are handled separate, therefore no difference in running it here or the separate Step(s)
-    for idx, row in df.iterrows():
-        antigen = row.get('antigen_seq')
-        if not antigen:
-            print(f"Row {idx} has no antigen sequence.")
-            return None
-        else:
-            is_incomplete = int('X' in antigen)
-            clean_seq     = antigen.replace('X', '')
-            try:
-                agn = ProteinAnalysis(clean_seq)
-            except Exception as e:
-                print(f"Row {idx}: failed to analyze antigen ({e})")
-            else:
-                inflamed_ant, normal_ant, hydrophobicity_ant = calc_autocorrelations_mini(clean_seq, dict_normal, dict_inflamed, dict_hydro)
-                df.at[idx, "ant_ctd_array"] = np.array(GetProDes(clean_seq).GetCTD())
-                df.at[idx, 'antigen_geary_hydrophobicity'] = hydrophobicity_ant
-                val = agn.isoelectric_point()
-                df.at[idx, 'antigen_pi'] = float(f"{val:.5g}")
-                df.at[idx, 'antigen_blood_geary_charge'] = normal_ant
-                df.at[idx, 'antigen_inflamed_geary_charge'] = inflamed_ant
-                df.at[idx, 'antigen_is_incomplete']       = is_incomplete
-                df.at[idx, "antigen_seq"] = clean_seq
-    return df
+def calculate_antigen_chars(df: pd.DataFrame) -> pd.DataFrame:
+    df_out = df.copy()
+
+    if 'antigen_seq' in df_out.columns:
+        antigen_original = df_out['antigen_seq'].dropna()
+        antigen_clean = antigen_original.str.replace('X', '')
+        df_out['antigen_is_incomplete'] = antigen_original.str.contains('X').astype(int)
+        df_out['antigen_pi'] = antigen_clean.apply(lambda s: ProteinAnalysis(s).isoelectric_point())
+        df_out['ant_ctd'] = antigen_clean.apply(compute_ctd_vector)
+        df_out['antigen_seq'] = antigen_clean
+        
+    return df_out
 
 def inspect_verbose(df):
     for idx, row in df.iterrows():
@@ -340,4 +261,9 @@ def merger_func(plot_df, cdr_df) -> pd.DataFrame:
     merged_df = pd.merge(plot_df, cdr_df, on='h3_chain', how='left')
     return merged_df
 
-
+def compute_ctd_vector(sequence: str) -> list:
+    ctd_dict = GetProDes(sequence).GetCTD()
+    processed_values = []
+    for value in ctd_dict.values():
+        processed_values.append(float(value))
+    return processed_values
