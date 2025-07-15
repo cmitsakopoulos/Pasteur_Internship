@@ -397,6 +397,9 @@ class WorkWithDatabase(Step):
         return data
     
 class ComputeDistanceMatrices(Step):
+    """
+    Explanation: BLOSUM45 due to hypervariability of CDR3H sequences, this will be tweaked with BLOSUM62 as a substitute to observe differences in analysis outcome; regardless studies demonstrate preference for BLOSUM45 when handling CDR. Additionally, to make this pairwise (BLOSUM) similarity matrix useful, just like with CTD stats, values are normalised to eliminate strong outlier biases but for BLOSUM, the max normalised score of the matrix is subtracted against by all smaller values. As such, max similarity will have a distance of zero, while all others...since BLOSUM pairwise distances are computed pairwise in an NxN matrix, there will always be  of pairwise comparison on the same same sequence for this methodology to be just. 
+    """
     def _calculate_blosum_score(self, seq1: str, seq2: str) -> float:
         aligner = PairwiseAligner()
         aligner.substitution_matrix = substitution_matrices.load("BLOSUM45")
@@ -406,8 +409,14 @@ class ComputeDistanceMatrices(Step):
             return aligner.score(seq1, seq2)
         except Exception:
             return 0.0
+    """
+    Im keeping the same data dict retrieval despite its non-existence when starting up the recipe, purely because I know it works; bad practice nonetheless...
+    """
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         self.logger.log("ComputeDistanceMatrices → Starting...")
+        data = {}
+        path_to_csv = COMPUTATION_DIR / "cdr.csv"
+        data["cdr"] = pd.read_csv(path_to_csv)
         if 'cdr' not in data or data['cdr'].empty:
             self.logger.log("ComputeDistanceMatrices → SKIPPING: 'cdr' DataFrame not found or is empty.")
             return data
@@ -461,9 +470,6 @@ class ComputeDistanceMatrices(Step):
 
         self.logger.log("ComputeDistanceMatrices → Finished.")
         return data
-
-#Note I store the UMAP embedding on the distance matrix as parquet to avoid PreWalker conflicts with csv.
-#I prefer the user has to issue different recipes for each of the separate functions, as keep in mind I am working with 1.2k sequences, someone with 100k is ducked, the system might crash if it keeps resources too high for too long (running one step after the other nonstop).
 
 class TuneSNFParameters(Step):
     def __init__(self, logger: FileLogger, k_range: list = [10, 20, 30], mu_range: list = [0.3, 0.5, 0.8]):
@@ -573,67 +579,40 @@ class FuseAndProject(Step):
         
         return data
     
-#HDBSCAN still needs the user to declare the minimum size for a cluster, but you cannot be sure of what the correct number should be if you dont know your data well; hyperpatametre tuning therefore is done here...
 class GetDensity(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data = data.copy()
-        if 'umap_embedding' not in new_data:
-            self.logger.log("GetDensity → Skipping: 'umap_embedding' data not found.")
-            return new_data
+        self.logger.log("GetDensity → Starting cluster stability analysis.")
+        path_to_csv = INTERNAL_FILES_DIR / "fused_affinity_matrix.npz"
+        npz_file = np.load(path_to_csv)
 
-        self.logger.log("GetDensity → Analysing HDBSCAN cluster stability...")
-        embedding_df = new_data['umap_embedding']
-        coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
-        
-        stability_plot_path = os.path.join(INTERNAL_FILES_DIR, 'stability_plot.html')
+        self.logger.log("GetDensity → Analysing stability on the high-dimensional fused network...")
+        fused_affinity_matrix = npz_file['matrix']
+        fused_distance_matrix = 1 - fused_affinity_matrix
+        stability_plot_path = INTERNAL_FILES_DIR / 'stability_plot.html'
 
-        stability_df = DBCV(coords_2d)
+        stability_df = DBCV(fused_distance_matrix)
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=stability_df['min_cluster_size'],
-            y=stability_df['dbcv_score'],
+            y=stability_df['silhouette_score'], 
             mode='lines+markers',
-            name='DBCV Score'
+            name='Silhouette Score'
         ))
         fig.update_layout(
             title='HDBSCAN Cluster Stability (Higher is Better)',
-            xaxis_title='Minimum Cluster Size (i.e. Stability)',
-            yaxis_title='Relative Validity (DBCV Score)'
+            xaxis_title='Minimum Cluster Size',
+            yaxis_title='Silhouette Score' 
         )
         fig.write_html(stability_plot_path)
         self.logger.log(f"GetDensity → Saved interactive stability plot to {stability_plot_path}")
 
-        best_size = stability_df.loc[stability_df['dbcv_score'].idxmax()]
-        self.logger.log(f"GetDensity → Analysis complete. Best score found:\n{best_size}")
+        best_size = stability_df.loc[stability_df['silhouette_score'].idxmax()]
+        self.logger.log(f"GetDensity → Analysis complete. Optimal min_cluster_size found: {int(best_size['min_cluster_size'])}")
         
-        new_data['cluster_stability'] = stability_df
-        return new_data
-
-#Observe cluster aveues in form of dendrogram.
-class Dendrogram(Step):
-    def __init__(self, logger: FileLogger, min_cluster_size: int):
-        super().__init__(logger)
-        self.min_cluster_size = min_cluster_size
-
-    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data = data.copy()
-        if 'umap_embedding' not in new_data:
-            self.logger.log("Dendrogram → Skipping: 'umap_embedding' data not found.")
-            return new_data
-
-        self.logger.log(f"Dendrogram → Generating dendrogram with min_cluster_size={self.min_cluster_size}...")
-        embedding_df = new_data['umap_embedding']
-        coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
-        
-        tree_plot_path = os.path.join(INTERNAL_FILES_DIR, 'dendrogram_plot.html')
-        
-        fig = ff.create_dendrogram(coords_2d, labels=embedding_df['h3_chain'].to_list())
-        fig.update_layout(title='Sequence Cluster Dendrogram')
-        fig.write_html(tree_plot_path)
-        self.logger.log(f"Dendrogram → Saved interactive dendrogram to {tree_plot_path}")
-        
-        return new_data
+        data['cluster_stability'] = stability_df
+        data['best_min_cluster_size'] = int(best_size['min_cluster_size'])
+        return data
 
 class HDBSCAN(Step):
     def __init__(self, logger: FileLogger, min_cluster_size: int):

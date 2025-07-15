@@ -10,6 +10,7 @@ import numpy as np
 import umap
 import hdbscan
 from propy.PyPro import GetProDes
+from sklearn.metrics import silhouette_score
 
 
 from app_components.config import INTERNAL_FILES_DIR
@@ -236,16 +237,21 @@ def hbdscan_cluster(coords_2d: np.ndarray, min_cluster_size: int = 10) -> np.nda
     labels = clusterer.fit_predict(coords_2d)
     return labels
 
-def DBCV(coords_2d: np.ndarray) -> pd.DataFrame:
+def DBCV(distance_matrix: np.ndarray) -> pd.DataFrame:
     sizes = range(5, 31, 2)
     scores = []
     for size in sizes:
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=size,
-            gen_min_span_tree=True
-        ).fit(coords_2d)
-        score = clusterer.relative_validity_
-        scores.append({'min_cluster_size': size, 'dbcv_score': score})
+            metric='precomputed'
+        )
+        labels = clusterer.fit_predict(distance_matrix)
+        if len(set(labels)) < 2:
+            score = -1 
+        else:
+            score = silhouette_score(distance_matrix, labels)   
+        scores.append({'min_cluster_size': size, 'silhouette_score': score})
+        
     return pd.DataFrame(scores)
 
 def UMAP(distance_matrix: np.ndarray) -> np.ndarray:

@@ -23,8 +23,8 @@ RECIPES = {
     "Standard": [CleanUp, PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation, AssignIDs, ComputeRelationships, Write],
     "Rerun": [PreWalker, Walker, Concatenation, FlattenDuplicates, RmPurificationTags, CDRComputation, AntigenComputation,
         AssignIDs, ComputeRelationships, Write],
-    "Distance Matrix": [PreWalker, Walker, Concatenation, ComputeDistanceMatrices],
-    "Generate Scatter Plot": [TuneSNFParameters, FuseAndProject],
+    "Distance Matrix": [ComputeDistanceMatrices],
+    "Generate Scatter Plot": [ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject],
     "Identify MinClusterNum": [GetDensity],
     "Dendrogram": [Dendrogram],
     "Perform Clustering": [HDBSCAN]
@@ -123,7 +123,7 @@ def render_dashboard_page():
         with st.expander("**2. Analysis**", expanded=False):
             path_analysis = str(INTERNAL_FILES_DIR)
 
-            st.subheader("Stage 1: Pre-computation")
+            st.subheader("Relative Distance and Space Projection")
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("Calculate Distance Matrix", use_container_width=True, disabled=is_running):
@@ -149,7 +149,7 @@ def render_dashboard_page():
                     else: st.warning("Another pipeline is already running.")
             
             st.divider()
-            st.subheader("Stage 2: Clustering Analysis")
+            st.subheader("Density Analysis-Hyperparametre Tuning")
             
             if st.button("Analyse Cluster Stability", use_container_width=True, disabled=is_running):
                 if not st.session_state.running_job_id:
@@ -163,23 +163,11 @@ def render_dashboard_page():
                 else: st.warning("Another pipeline is already running.")
 
             st.divider()
-            st.subheader("Stage 3: Perform Clustering")
+            st.subheader("HDBSCAN Clustering")
             min_size = st.number_input("Minimum Cluster Size", min_value=2, value=15, step=1, help="Set the minimum cluster size for Dendrogram and HDBSCAN steps.")
             
-            col3, col4 = st.columns(2)
+            col3 = st.columns(1)
             with col3:
-                if st.button("Generate Dendrogram", use_container_width=True, disabled=is_running):
-                    if not st.session_state.running_job_id:
-                        st.session_state.text_output = ""
-                        job_id = f"job_{time.time()}"
-                        st.session_state.running_job_id = job_id
-                        params = {'min_cluster_size': min_size}
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Dendrogram", path_analysis, params))
-                        st.session_state.active_thread = thread
-                        thread.start()
-                        st.info("Started dendrogram generation.")
-                    else: st.warning("Another pipeline is already running.")
-            with col4:
                 if st.button("Perform HDBSCAN Clustering", type="primary", use_container_width=True, disabled=is_running):
                     if not st.session_state.running_job_id:
                         st.session_state.text_output = ""
@@ -229,7 +217,7 @@ def render_dashboard_page():
                     <style>
                     .spinner {
                         border: 4px solid rgba(255, 255, 255, 0.3);
-                        border-left-color: #09ab3b; /* Streamlit's green */
+                        border-left-color: #09ab3b; 
                         border-radius: 50%;
                         width: 30px;
                         height: 30px;
@@ -256,10 +244,9 @@ def render_dashboard_page():
         with tab_plots:
 
             PLOTS = {
-                "UMAP Projection": {"file": "unclustered_umap_plot.html", "header": "UMAP Projection of Sequence Space"},
-                "HDBSCAN Clustering": {"file": "cluster_plot.html", "header": "HDBSCAN Clustering Result"},
+                "UMAP Projection": {"file": "snf_umap_projection.html", "header": "UMAP Projection of Relative Distance"},
+                "HDBSCAN Clustering": {"file": "cluster_plot.html", "header": "HDBSCAN Clustering On Relative Distances"},
                 "Cluster Stability": {"file": "stability_plot.html", "header": "Cluster Stability Analysis"},
-                "Dendrogram": {"file": "dendrogram_plot.html", "header": "Cluster Dendrogram"}
             }
 
             selected_plot_name = st.selectbox(
