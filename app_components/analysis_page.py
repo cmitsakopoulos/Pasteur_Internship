@@ -119,7 +119,7 @@ def render_dashboard_page():
                 else:
                     st.warning("Another pipeline is already running.")
         
-        with st.expander("**2. Analysis**", expanded=False):
+        with st.expander("**2. Debugged Analysis**", expanded=False):
             path_analysis = str(INTERNAL_FILES_DIR)
 
             st.subheader("Distance and Approximate Space Projection")
@@ -165,7 +165,7 @@ def render_dashboard_page():
 
             st.divider()
             st.subheader("Spectral Clustering")
-            desired_n = st.number_input("Desired Clusters", min_value=2, value=15, step=1, help="Set amount of desired clusters.")
+            desired_n = st.number_input("Desired Clusters", min_value=2, value=7, step=1, help="Set amount of desired clusters.")
             
             if st.button("Perform Spectral Clustering", type="primary", use_container_width=True, disabled=is_running):
                 if not st.session_state.running_job_id:
@@ -179,7 +179,51 @@ def render_dashboard_page():
                     st.info("Started Spectral clustering.")
                 else: st.warning("Another pipeline is already running.")
 
-        with st.expander("**3. Inspect a Data File**"):
+        with st.expander("**3. Experimental Approach**", expanded=False):
+            path_analysis = str(INTERNAL_FILES_DIR)
+
+            st.subheader("Distance and Approximate Space Projection")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Calculate Distance Matrix", use_container_width=True, disabled=is_running):
+                    if not st.session_state.running_job_id:
+                        st.session_state.text_output = ""
+                        job_id = f"job_{time.time()}"
+                        st.session_state.running_job_id = job_id
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", path_analysis))
+                        st.session_state.active_thread = thread
+                        thread.start()
+                        st.info("Started distance matrix calculation.")
+                    else: st.warning("Another pipeline is already running.")
+            with col2:
+                if st.button("Generate UMAP Plot", use_container_width=True, disabled=is_running):
+                    if not st.session_state.running_job_id:
+                        st.session_state.text_output = ""
+                        job_id = f"job_{time.time()}"
+                        st.session_state.running_job_id = job_id
+                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Generate Scatter Plot", path_analysis))
+                        st.session_state.active_thread = thread
+                        thread.start()
+                        st.info("Started UMAP generation.")
+                    else: st.warning("Another pipeline is already running.")
+
+            st.divider()
+            st.subheader("Procrustes Analysis")
+            desired_n = st.number_input("Desired Clusters", min_value=2, value=15, step=1, help="Set amount of desired clusters.")
+            
+            if st.button("Separate Analysis Clustering", type="primary", use_container_width=True, disabled=is_running):
+                if not st.session_state.running_job_id:
+                    st.session_state.text_output = ""
+                    job_id = f"job_{time.time()}"
+                    st.session_state.running_job_id = job_id 
+                    params = {'n_clusters': desired_n}
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "SpectralClustering", path_analysis, params))
+                    st.session_state.active_thread = thread
+                    thread.start()
+                    st.info("Started Spectral clustering.")
+                else: st.warning("Another pipeline is already running.")
+
+        with st.expander("**4. Inspect a Data File**"):
             uploaded_file = st.file_uploader("Upload a data file for analysis", type=["csv"], help="Upload a processed or external CSV file.")
             col1, col2 = st.columns(2)
             with col1:
