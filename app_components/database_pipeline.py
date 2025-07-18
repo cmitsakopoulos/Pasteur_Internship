@@ -14,12 +14,13 @@ from sqlalchemy.pool import NullPool
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import pairwise_distances
 from Bio.Align import PairwiseAligner, substitution_matrices
-import plotly.graph_objects as go
-import plotly.figure_factory as ff
 import plotly.express as px
 import snf
 from scipy.linalg import eigh
 from itertools import product
+from sklearn.cluster import SpectralClustering
+from dbcv import dbcv
+import hdbscan
 
 from app_components.function_dump import (
     extractor,
@@ -29,10 +30,8 @@ from app_components.function_dump import (
     to_list,
     prefix,
     clear_dir,
-    hbdscan_cluster,
-    DBCV,
     UMAP,
-    merger_func
+    merger_func,
 )
 
 from app_components.config import INTERNAL_FILES_DIR, COMPUTATION_DIR, SQL_DIR
@@ -527,6 +526,7 @@ class FuseAndProject(Step):
         if 'ctd_dist_matrix' not in data or 'blosum_dist_matrix' not in data:
             self.logger.log("FuseAndProject → SKIPPING: Required distance matrices not found in data dictionary.")
             return data
+        
         fused_matrix_path = INTERNAL_FILES_DIR / 'fused_affinity_matrix.npz'
         plot_filepath = INTERNAL_FILES_DIR / 'snf_umap_projection.html'
 
@@ -559,10 +559,12 @@ class FuseAndProject(Step):
             'umap_y': coords_2d[:, 1]
         })
 
-        merged_df = merger_func(embedding_df, data["cdr"]) 
-        data['snf_embedding'] = merged_df
-        self.logger.log(f"FuseAndProject → Complete. Added 'snf_embedding' DataFrame with {len(merged_df)} rows.")
+        embedding_path = INTERNAL_FILES_DIR / 'snf_embedding.parquet'
+        embedding_df.to_parquet(embedding_path, index=False)
+        self.logger.log("FuseAndProject → Printed the 2D embedding into parquet format.")
 
+        merged_df = merger_func(embedding_df, data["cdr"]) 
+        self.logger.log(f"FuseAndProject → Complete. Added 'snf_embedding' DataFrame with {len(merged_df)} rows.")
         self.logger.log("FuseAndProject → Generating interactive plot...")
         fig = px.scatter(
             merged_df, 
@@ -578,84 +580,155 @@ class FuseAndProject(Step):
         self.logger.log(f"FuseAndProject → Saved interactive plot to {plot_filepath}")
         
         return data
-    
-class GetDensity(Step):
-    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        self.logger.log("GetDensity → Starting cluster stability analysis.")
-        path_to_csv = INTERNAL_FILES_DIR / "fused_affinity_matrix.npz"
-        npz_file = np.load(path_to_csv)
-
-        self.logger.log("GetDensity → Analysing stability on the high-dimensional fused network...")
-        fused_affinity_matrix = npz_file['matrix']
-        fused_distance_matrix = 1 - fused_affinity_matrix
-        stability_plot_path = INTERNAL_FILES_DIR / 'stability_plot.html'
-
-        stability_df = DBCV(fused_distance_matrix)
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=stability_df['min_cluster_size'],
-            y=stability_df['silhouette_score'], 
-            mode='lines+markers',
-            name='Silhouette Score'
-        ))
-        fig.update_layout(
-            title='HDBSCAN Cluster Stability (Higher is Better)',
-            xaxis_title='Minimum Cluster Size',
-            yaxis_title='Silhouette Score' 
-        )
-        fig.write_html(stability_plot_path)
-        self.logger.log(f"GetDensity → Saved interactive stability plot to {stability_plot_path}")
-
-        best_size = stability_df.loc[stability_df['silhouette_score'].idxmax()]
-        self.logger.log(f"GetDensity → Analysis complete. Optimal min_cluster_size found: {int(best_size['min_cluster_size'])}")
-        
-        data['cluster_stability'] = stability_df
-        data['best_min_cluster_size'] = int(best_size['min_cluster_size'])
-        return data
 
 class HDBSCAN(Step):
-    def __init__(self, logger: FileLogger, min_cluster_size: int):
+    def __init__(self, logger: FileLogger, min_cluster_size: int = 15):
         super().__init__(logger)
-        if not isinstance(min_cluster_size, int) or min_cluster_size < 1:
-            raise ValueError("min_cluster_size must be an integer greater than 1.")
+        if not isinstance(min_cluster_size, int) or min_cluster_size < 2:
+            raise ValueError("min_cluster_size must be an integer of 2 or greater.")
         self.min_cluster_size = min_cluster_size
 
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        new_data = data.copy()
-        if 'umap_embedding' not in new_data:
-            self.logger.log("HDBSCAN → Skipping: 'umap_embedding' DataFrame not found.")
-            return new_data
+        self.logger.log(f"HDBSCAN → Starting final clustering with min_cluster_size={self.min_cluster_size}.")
+        
+        fused_matrix_path = INTERNAL_FILES_DIR / 'fused_affinity_matrix.npz'
+        embedding_path = INTERNAL_FILES_DIR / 'snf_embedding.parquet' 
+        cdr_data_path = COMPUTATION_DIR / 'cdr.csv'
 
-        self.logger.log(f"HDBSCAN → Clustering with min_cluster_size={self.min_cluster_size}")
-        embedding_df = new_data['umap_embedding'].copy()
-        coords_2d = embedding_df[['umap_x', 'umap_y']].to_numpy()
+        if not all([fused_matrix_path.exists(), embedding_path.exists(), cdr_data_path.exists()]):
+            self.logger.log("HDBSCAN → SKIPPING: Required input file (matrix, embedding, or cdr) not found.")
+            return data
 
-        cluster_labels = hbdscan_cluster(coords_2d, self.min_cluster_size)
-        embedding_df['cluster_id'] = cluster_labels
-        new_data['umap_clusters'] = embedding_df
+        npz_file = np.load(fused_matrix_path)
+        fused_affinity_matrix = npz_file['matrix']
+        embedding_df = pd.read_parquet(embedding_path)
+        cdr_df = pd.read_csv(cdr_data_path)
 
-        interactive_plot_path = os.path.join(INTERNAL_FILES_DIR, 'cluster_plot.html')
+        self.logger.log("HDBSCAN → Merging embedding with metadata for plotting...")
+        full_embedding_df = merger_func(embedding_df, cdr_df)
+
+        self.logger.log("HDBSCAN → Clustering the high-dimensional fused distance matrix...")
+        fused_distance_matrix = 1 - fused_affinity_matrix
+        
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=self.min_cluster_size,
+            metric='precomputed'
+        )
+        cluster_labels = clusterer.fit_predict(fused_distance_matrix)
+        
+        clustered_df = full_embedding_df.copy()
+        clustered_df['cluster_id'] = cluster_labels
+        data['final_clusters'] = clustered_df
+
+        outlier_mask = clustered_df['cluster_id'] == -1
+        outlier_count = outlier_mask.sum()
+        if outlier_count > 0:
+            outlier_percentage = (outlier_count / len(clustered_df)) * 100
+            self.logger.log(f"HDBSCAN → Outlier Check: Identified {outlier_count} noise points ({outlier_percentage:.2f}%).")
+            data['outlier_sequences'] = clustered_df[outlier_mask]
+
+        core_points_mask = cluster_labels != -1
+        core_labels = cluster_labels[core_points_mask]
+        
+        if len(np.unique(core_labels)) >= 2:
+            self.logger.log("HDBSCAN → Calculating DBCV score on core cluster points...")
+            core_distance_matrix = fused_distance_matrix[core_points_mask, :][:, core_points_mask]
+            try:
+                score = dbcv(core_distance_matrix, core_labels)
+                self.logger.log(f"HDBSCAN → Calculated DBCV Score: {score:.4f} (higher is better)")
+                data['dbcv_score'] = score
+            except Exception as e:
+                self.logger.log(f"HDBSCAN → ERROR - cannot not compute DBCV score: {e}")
+        else:
+            self.logger.log("HDBSCAN → Not enough clusters to compute a DBCV score.")
+
+        interactive_plot_path = INTERNAL_FILES_DIR / 'snf_cluster_plot.html'
+        self.logger.log(f"HDBSCAN → Generating final interactive plot...")
         
         fig = px.scatter(
-            embedding_df,
-            x='umap_x',
-            y='umap_y',
-            color=embedding_df['cluster_id'].astype(str),
-            hover_name='h3_chain',
-            hover_data= ['pdb_id', 'heavy_host_organism_name'],
-            color_discrete_map={'-1': 'lightgrey'},
-            title=f'HDBSCAN Clustering (min_cluster_size={self.min_cluster_size})'
+            clustered_df,
+            x='umap_x', y='umap_y', color='cluster_id',
+            color_continuous_scale=px.colors.qualitative.Vivid,
+            hover_name='h3_chain', hover_data=['pdb_id', 'heavy_host_organism_name'], 
+            title=f'HDBSCAN Clustering on Fused Network (min_cluster_size={self.min_cluster_size}, DBCV_score = {score})'
         )
-        fig.update_traces(marker=dict(size=5))
+        fig.for_each_trace(lambda t: t.update(marker_size=5) if t.name != '-1' else t.update(marker_size=3, marker_color='lightgrey'))
         fig.update_layout(xaxis_title="UMAP 1", yaxis_title="UMAP 2")
         fig.write_html(interactive_plot_path)
 
-        self.logger.log(f"HDBSCAN → Saved interactive plot to {interactive_plot_path}")
+        self.logger.log(f"HDBSCAN → Saved final plot to {interactive_plot_path}")
         n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
         self.logger.log(f"HDBSCAN → Clustering complete. Found {n_clusters} clusters.")
         
-        if 'umap_embedding' in new_data:
-             del new_data['umap_embedding']
+        return data
 
-        return new_data
+class Spectral_Clustering(Step):
+    def __init__(self, logger: FileLogger, n_clusters: int = 5):
+        super().__init__(logger)
+        if not isinstance(n_clusters, int) or n_clusters < 2:
+            raise ValueError("n_clusters must be an integer of 2 or greater.")
+        self.n_clusters = n_clusters
+
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        self.logger.log(f"SpectralClustering → Starting clustering for k={self.n_clusters} clusters.")
+        
+        fused_matrix_path = INTERNAL_FILES_DIR / 'fused_affinity_matrix.npz'
+        embedding_path = INTERNAL_FILES_DIR / 'snf_embedding.parquet' 
+        cdr_data_path = COMPUTATION_DIR / 'cdr.csv'
+
+        if not all([fused_matrix_path.exists(), embedding_path.exists(), cdr_data_path.exists()]):
+            self.logger.log("SpectralClustering → SKIPPING: Required input file (matrix, embedding, or cdr) not found.")
+            return data
+
+        npz_file = np.load(fused_matrix_path)
+        fused_affinity_matrix = npz_file['matrix']
+        embedding_df = pd.read_parquet(embedding_path)
+        cdr_df = pd.read_csv(cdr_data_path)
+
+        self.logger.log("SpectralClustering → Merging embedding with metadata for plotting...")
+        full_embedding_df = merger_func(embedding_df, cdr_df)
+
+        self.logger.log("SpectralClustering → Clustering the fused affinity matrix...")
+        
+        clusterer = SpectralClustering(
+            n_clusters=self.n_clusters,
+            affinity='precomputed',
+            assign_labels='kmeans',
+            random_state=42
+        )
+        cluster_labels = clusterer.fit_predict(fused_affinity_matrix)
+        
+        clustered_df = full_embedding_df.copy()
+        clustered_df['cluster_id'] = cluster_labels
+        data['final_clusters'] = clustered_df
+
+        interactive_plot_path = INTERNAL_FILES_DIR / 'spectral_cluster_plot.html'
+        self.logger.log(f"SpectralClustering → Generating final interactive plot...")
+        
+        fig = px.scatter(
+            clustered_df,
+            x='umap_x', 
+            y='umap_y', 
+            color=clustered_df['cluster_id'].astype(str),
+            color_discrete_sequence=px.colors.qualitative.Vivid,
+            hover_name='h3_chain', 
+            hover_data=['pdb_id', 'heavy_host_organism_name'], 
+            title=f'Spectral Clustering on Fused Network (k={self.n_clusters})'
+        )
+        
+        fig.update_traces(
+            marker=dict(size=7, line=dict(width=1, color='Black'))
+        )
+        
+        fig.update_layout(
+            xaxis_title="UMAP 1", 
+            yaxis_title="UMAP 2",
+            legend_title_text='Cluster ID'
+        )
+        
+        fig.write_html(interactive_plot_path)
+
+        self.logger.log(f"SpectralClustering → Saved final plot to {interactive_plot_path}")
+        self.logger.log(f"SpectralClustering → Clustering complete. Found {self.n_clusters} clusters.")
+        
+        return data

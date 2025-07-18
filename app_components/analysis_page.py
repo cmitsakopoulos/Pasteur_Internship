@@ -1,21 +1,19 @@
 import streamlit as st
 import pandas as pd
 import time
-import psutil
 import os
 import threading
 from io import StringIO
 import contextlib
 from streamlit_autorefresh import st_autorefresh
-from streamlit_extras.metric_cards import style_metric_cards
-from streamlit_extras.colored_header import colored_header
+
 from app_components.config import IMAGES_DIR, INTERNAL_FILES_DIR
 
 from app_components.database_pipeline import (
     FileLogger, Pipeline, Concatenation, CDRComputation, 
     AntigenComputation, FlattenDuplicates, Write, RmPurificationTags, 
     AssignIDs, ComputeRelationships, CleanUp, 
-    PreWalker, Walker, GetDensity, Dendrogram, HDBSCAN, ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject
+    PreWalker, Walker, HDBSCAN, ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject, Spectral_Clustering
 )
 from app_components.function_dump import inspect_summary, inspect_verbose
 
@@ -25,9 +23,8 @@ RECIPES = {
         AssignIDs, ComputeRelationships, Write],
     "Distance Matrix": [ComputeDistanceMatrices],
     "Generate Scatter Plot": [ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject],
-    "Identify MinClusterNum": [GetDensity],
-    "Dendrogram": [Dendrogram],
-    "Perform Clustering": [HDBSCAN]
+    "HDBSCAN": [HDBSCAN],
+    "SpectralClustering": [Spectral_Clustering],
 }
 
 def build_pipeline(recipe: str, path: str, logger: FileLogger, params: dict = None) -> Pipeline:
@@ -38,9 +35,12 @@ def build_pipeline(recipe: str, path: str, logger: FileLogger, params: dict = No
     for step_class in RECIPES[recipe]:
         if step_class is PreWalker:
             steps.append(step_class(input_path=path, logger=logger))
-        elif step_class is Dendrogram or step_class is HDBSCAN:
+        elif step_class is HDBSCAN:
             min_size = params.get('min_cluster_size', 15)
             steps.append(step_class(logger=logger, min_cluster_size=min_size))
+        elif step_class is Spectral_Clustering:
+            desired_n = params.get('n_clusters', 5)
+            steps.append(step_class(logger=logger, n_clusters=desired_n))
         else:
             steps.append(step_class(logger=logger))
     return Pipeline(steps, logger)
@@ -67,6 +67,7 @@ def get_subdirectories(path='.'):
 
 def render_dashboard_page():
 
+    st_autorefresh(interval=2000, key="global_refresher")
     if "text_output" not in st.session_state: st.session_state.text_output = ""
     if "running_job_id" not in st.session_state: st.session_state.running_job_id = None
     if "active_thread" not in st.session_state: st.session_state.active_thread = None
@@ -74,13 +75,13 @@ def render_dashboard_page():
     control_col, dashboard_col = st.columns((1, 2))
 
     with control_col:
-        st.image("./Images/logo.png", width=230)
+        st.image(str(IMAGES_DIR / "logo.png"), width=230)
         st.title("Control Panel")
 
         if st.session_state.running_job_id and st.session_state.active_thread:
             if not st.session_state.active_thread.is_alive():
                 job_id = st.session_state.running_job_id
-                log_filename = os.path.abspath(os.path.join("Internal_Files", f"{job_id}.log"))
+                log_filename = INTERNAL_FILES_DIR / f"{job_id}.log"
 
                 if os.path.exists(log_filename):
                     try:
@@ -110,9 +111,7 @@ def render_dashboard_page():
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
                     st.session_state.running_job_id = job_id
-
                     clean_path = path_run.strip().strip('"') #learned this the hard way
-
                     thread = threading.Thread(target=run_pipeline_worker, args=(job_id, recipe, clean_path))
                     st.session_state.active_thread = thread
                     thread.start()
@@ -123,7 +122,7 @@ def render_dashboard_page():
         with st.expander("**2. Analysis**", expanded=False):
             path_analysis = str(INTERNAL_FILES_DIR)
 
-            st.subheader("Relative Distance and Space Projection")
+            st.subheader("Distance and Approximate Space Projection")
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("Calculate Distance Matrix", use_container_width=True, disabled=is_running):
@@ -147,38 +146,38 @@ def render_dashboard_page():
                         thread.start()
                         st.info("Started UMAP generation.")
                     else: st.warning("Another pipeline is already running.")
-            
-            st.divider()
-            st.subheader("Density Analysis-Hyperparametre Tuning")
-            
-            if st.button("Analyse Cluster Stability", use_container_width=True, disabled=is_running):
-                if not st.session_state.running_job_id:
-                    st.session_state.text_output = ""
-                    job_id = f"job_{time.time()}"
-                    st.session_state.running_job_id = job_id
-                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Identify MinClusterNum", path_analysis))
-                    st.session_state.active_thread = thread
-                    thread.start()
-                    st.info("Started stability analysis.")
-                else: st.warning("Another pipeline is already running.")
 
             st.divider()
             st.subheader("HDBSCAN Clustering")
-            min_size = st.number_input("Minimum Cluster Size", min_value=2, value=15, step=1, help="Set the minimum cluster size for Dendrogram and HDBSCAN steps.")
+            min_size = st.number_input("Minimum Cluster Size", min_value=2, value=15, step=1, help="Set minimum cluster size for HDBSCAN.")
             
-            col3 = st.columns(1)
-            with col3:
-                if st.button("Perform HDBSCAN Clustering", type="primary", use_container_width=True, disabled=is_running):
-                    if not st.session_state.running_job_id:
-                        st.session_state.text_output = ""
-                        job_id = f"job_{time.time()}"
-                        st.session_state.running_item_id = job_id
-                        params = {'min_cluster_size': min_size}
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Perform Clustering", path_analysis, params))
-                        st.session_state.active_thread = thread
-                        thread.start()
-                        st.info("Started HDBSCAN clustering.")
-                    else: st.warning("Another pipeline is already running.")
+            if st.button("Perform HDBSCAN Clustering", type="primary", use_container_width=True, disabled=is_running):
+                if not st.session_state.running_job_id:
+                    st.session_state.text_output = ""
+                    job_id = f"job_{time.time()}"
+                    st.session_state.running_job_id = job_id 
+                    params = {'min_cluster_size': min_size}
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "HDBSCAN", path_analysis, params))
+                    st.session_state.active_thread = thread
+                    thread.start()
+                    st.info("Started HDBSCAN clustering.")
+                else: st.warning("Another pipeline is already running.")
+
+            st.divider()
+            st.subheader("Spectral Clustering")
+            desired_n = st.number_input("Desired Clusters", min_value=2, value=15, step=1, help="Set amount of desired clusters.")
+            
+            if st.button("Perform Spectral Clustering", type="primary", use_container_width=True, disabled=is_running):
+                if not st.session_state.running_job_id:
+                    st.session_state.text_output = ""
+                    job_id = f"job_{time.time()}"
+                    st.session_state.running_job_id = job_id 
+                    params = {'n_clusters': desired_n}
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "SpectralClustering", path_analysis, params))
+                    st.session_state.active_thread = thread
+                    thread.start()
+                    st.info("Started Spectral clustering.")
+                else: st.warning("Another pipeline is already running.")
 
         with st.expander("**3. Inspect a Data File**"):
             uploaded_file = st.file_uploader("Upload a data file for analysis", type=["csv"], help="Upload a processed or external CSV file.")
@@ -212,7 +211,6 @@ def render_dashboard_page():
         st.header("Activity & Results")
 
         if st.session_state.running_job_id:
-                st_autorefresh(interval=2000, key="global_refresher")
                 spinner_css = """
                     <style>
                     .spinner {
@@ -239,14 +237,14 @@ def render_dashboard_page():
                     st.info("Pipeline is running in the background. This page will auto-refresh.")
         
 
-        tab_plots, tab_logs, tab_status = st.tabs(["Visualisations", "Logs", "Resources"])
+        tab_plots, tab_logs = st.tabs(["Visualisations", "Logs"])
         
         with tab_plots:
 
             PLOTS = {
                 "UMAP Projection": {"file": "snf_umap_projection.html", "header": "UMAP Projection of Relative Distance"},
-                "HDBSCAN Clustering": {"file": "cluster_plot.html", "header": "HDBSCAN Clustering On Relative Distances"},
-                "Cluster Stability": {"file": "stability_plot.html", "header": "Cluster Stability Analysis"},
+                "HDBSCAN Clustering": {"file": "snf_cluster_plot.html", "header": "HDBSCAN Clustering On Distance Matrices"},
+                "Spectral Clustering": {"file": "spectral_cluster_plot.html", "header": "Spectral Clustering On Distance Matrices"},
             }
 
             selected_plot_name = st.selectbox(
@@ -273,25 +271,3 @@ def render_dashboard_page():
                 st.info("Output from a pipeline run or file inspection will be shown here.")
             else:
                 st.info("Job is in progress...")
-
-        with tab_status:
-            st_autorefresh(interval=1000, key="resource_refresher")
-            colored_header(
-                label="Resource Monitoring",
-                description="Auto-refreshing snapshot of system resources.",
-                color_name="green-70"
-            )
-
-            col1, col2, col3 = st.columns(3)
-            
-            cpu_usage = psutil.cpu_percent()
-            col1.metric(label="System CPU Utilization", value=f"{cpu_usage}%")
-            
-            mem_info = psutil.virtual_memory()
-            col2.metric(label="System RAM Usage", value=f"{(mem_info.total - mem_info.available) / (1024**3):.2f} GB")
-
-            current_process = psutil.Process()
-            process_mem_mb = current_process.memory_info().rss / (1024**2)
-            col3.metric(label="App RAM Usage", value=f"{process_mem_mb:.2f} MB")
-            
-            style_metric_cards(border_left_color="#0068C9")

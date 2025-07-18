@@ -8,9 +8,7 @@ import pandas as pd
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import numpy as np
 import umap
-import hdbscan
 from propy.PyPro import GetProDes
-from sklearn.metrics import silhouette_score
 
 
 from app_components.config import INTERNAL_FILES_DIR
@@ -231,28 +229,6 @@ def clear_dir(path: str, exception=None):
             os.remove(full)
         elif os.path.isdir(full):
             shutil.rmtree(full)
-
-def hbdscan_cluster(coords_2d: np.ndarray, min_cluster_size: int = 10) -> np.ndarray:
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size)
-    labels = clusterer.fit_predict(coords_2d)
-    return labels
-
-def DBCV(distance_matrix: np.ndarray) -> pd.DataFrame:
-    sizes = range(5, 31, 2)
-    scores = []
-    for size in sizes:
-        clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=size,
-            metric='precomputed'
-        )
-        labels = clusterer.fit_predict(distance_matrix)
-        if len(set(labels)) < 2:
-            score = -1 
-        else:
-            score = silhouette_score(distance_matrix, labels)   
-        scores.append({'min_cluster_size': size, 'silhouette_score': score})
-        
-    return pd.DataFrame(scores)
 
 def UMAP(distance_matrix: np.ndarray) -> np.ndarray:
     reducer = umap.UMAP(
