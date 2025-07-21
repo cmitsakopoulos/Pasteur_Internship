@@ -13,7 +13,7 @@ from app_components.database_pipeline import (
     FileLogger, Pipeline, Concatenation, CDRComputation, 
     AntigenComputation, FlattenDuplicates, Write, RmPurificationTags, 
     AssignIDs, ComputeRelationships, CleanUp, 
-    PreWalker, Walker, HDBSCAN, ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject, Spectral_Clustering
+    PreWalker, Walker, HDBSCAN, ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject, Spectral_Clustering, MantelTest, Procrustes_Analysis
 )
 from app_components.function_dump import inspect_summary, inspect_verbose
 
@@ -23,6 +23,8 @@ RECIPES = {
         AssignIDs, ComputeRelationships, Write],
     "Distance Matrix": [ComputeDistanceMatrices],
     "Generate Scatter Plot": [ComputeDistanceMatrices, TuneSNFParameters, FuseAndProject],
+    "Mantel Test": [MantelTest],
+    "Procrustes": [Procrustes_Analysis],
     "HDBSCAN": [HDBSCAN],
     "SpectralClustering": [Spectral_Clustering],
 }
@@ -118,14 +120,56 @@ def render_dashboard_page():
                     st.info(f"Started '{recipe}' pipeline in the background.")
                 else:
                     st.warning("Another pipeline is already running.")
-        
-        with st.expander("**2. Debugged Analysis**", expanded=False):
+
+        with st.expander("**2. Separate CTD/BLOSUM Descriptor Analysis**", expanded=False):
+            path_analysis = str(INTERNAL_FILES_DIR)
+
+            st.subheader("Distance Matrices for Downstream Analysis")
+            if st.button("Calculate Distance Matrices", key= "dist_separate", use_container_width=True, disabled=is_running):
+                if not st.session_state.running_job_id:
+                    st.session_state.text_output = ""
+                    job_id = f"job_{time.time()}"
+                    st.session_state.running_job_id = job_id
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", path_analysis))
+                    st.session_state.active_thread = thread
+                    thread.start()
+                    st.info("Started distance matrix calculation.")
+                else: st.warning("Another pipeline is already running.")
+
+            st.divider()
+            st.subheader("Mantel Correlation Test Between Distance Matrices")
+            if st.button("Perform Mantel Comparison", use_container_width=True, disabled=is_running):
+                if not st.session_state.running_job_id:
+                    st.session_state.text_output = ""
+                    job_id = f"job_{time.time()}"
+                    st.session_state.running_job_id = job_id
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Mantel Test", path_analysis))
+                    st.session_state.active_thread = thread
+                    thread.start()
+                    st.info("Started Mantel test.")
+                else: st.warning("Another pipeline is already running.")
+
+            st.divider()
+            st.subheader("Visual-Procrustes-Comparison on MDS Projection of Distance Matrices")
+            if st.button("Perform Procrustes Comparison", use_container_width=True, disabled=is_running):
+                if not st.session_state.running_job_id:
+                    st.session_state.text_output = ""
+                    job_id = f"job_{time.time()}"
+                    st.session_state.running_job_id = job_id
+                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Procrustes", path_analysis))
+                    st.session_state.active_thread = thread
+                    thread.start()
+                    st.info("Started Procrustes analysis.")
+                else: st.warning("Another pipeline is already running.")
+
+
+        with st.expander("**3. Similarity Network Fusion CTD+BLOSUM Analysis**", expanded=False):
             path_analysis = str(INTERNAL_FILES_DIR)
 
             st.subheader("Distance and Approximate Space Projection")
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Calculate Distance Matrix", use_container_width=True, disabled=is_running):
+                if st.button("Calculate Distance Matrices", key= "dist_SNF", use_container_width=True, disabled=is_running):
                     if not st.session_state.running_job_id:
                         st.session_state.text_output = ""
                         job_id = f"job_{time.time()}"
@@ -168,50 +212,6 @@ def render_dashboard_page():
             desired_n = st.number_input("Desired Clusters", min_value=2, value=7, step=1, help="Set amount of desired clusters.")
             
             if st.button("Perform Spectral Clustering", type="primary", use_container_width=True, disabled=is_running):
-                if not st.session_state.running_job_id:
-                    st.session_state.text_output = ""
-                    job_id = f"job_{time.time()}"
-                    st.session_state.running_job_id = job_id 
-                    params = {'n_clusters': desired_n}
-                    thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "SpectralClustering", path_analysis, params))
-                    st.session_state.active_thread = thread
-                    thread.start()
-                    st.info("Started Spectral clustering.")
-                else: st.warning("Another pipeline is already running.")
-
-        with st.expander("**3. Experimental Approach**", expanded=False):
-            path_analysis = str(INTERNAL_FILES_DIR)
-
-            st.subheader("Distance and Approximate Space Projection")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Calculate Distance Matrix", use_container_width=True, disabled=is_running):
-                    if not st.session_state.running_job_id:
-                        st.session_state.text_output = ""
-                        job_id = f"job_{time.time()}"
-                        st.session_state.running_job_id = job_id
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Distance Matrix", path_analysis))
-                        st.session_state.active_thread = thread
-                        thread.start()
-                        st.info("Started distance matrix calculation.")
-                    else: st.warning("Another pipeline is already running.")
-            with col2:
-                if st.button("Generate UMAP Plot", use_container_width=True, disabled=is_running):
-                    if not st.session_state.running_job_id:
-                        st.session_state.text_output = ""
-                        job_id = f"job_{time.time()}"
-                        st.session_state.running_job_id = job_id
-                        thread = threading.Thread(target=run_pipeline_worker, args=(job_id, "Generate Scatter Plot", path_analysis))
-                        st.session_state.active_thread = thread
-                        thread.start()
-                        st.info("Started UMAP generation.")
-                    else: st.warning("Another pipeline is already running.")
-
-            st.divider()
-            st.subheader("Procrustes Analysis")
-            desired_n = st.number_input("Desired Clusters", min_value=2, value=15, step=1, help="Set amount of desired clusters.")
-            
-            if st.button("Separate Analysis Clustering", type="primary", use_container_width=True, disabled=is_running):
                 if not st.session_state.running_job_id:
                     st.session_state.text_output = ""
                     job_id = f"job_{time.time()}"
@@ -286,9 +286,11 @@ def render_dashboard_page():
         with tab_plots:
 
             PLOTS = {
-                "UMAP Projection": {"file": "snf_umap_projection.html", "header": "UMAP Projection of Relative Distance"},
-                "HDBSCAN Clustering": {"file": "snf_cluster_plot.html", "header": "HDBSCAN Clustering On Distance Matrices"},
-                "Spectral Clustering": {"file": "spectral_cluster_plot.html", "header": "Spectral Clustering On Distance Matrices"},
+                "UMAP Projection": {"file": "snf_umap_projection.html", "header": "UMAP (Non-Linear) Projection of Relative Distance"},
+                "HDBSCAN Clustering": {"file": "snf_cluster_plot.html", "header": "UMAP (Non-Linear) Projection on HDBSCAN Clustering of Distance Matrices"},
+                "Spectral Clustering": {"file": "spectral_cluster_plot.html", "header": "UMAP (Non-Linear) Projection on Spectral Clustering of Distance Matrices"},
+                "Procrustes Comparison": {"file": "procrustes_comparison.html", "header": "MDS (Linear) Projection and Procrustes"},
+                "Mantel Test": {"file": "mantel_test_plot.html", "header": "Mantel Stastical Correlation Between Distance Matrices"}
             }
 
             selected_plot_name = st.selectbox(

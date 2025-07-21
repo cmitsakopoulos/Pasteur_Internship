@@ -2,6 +2,7 @@ import os
 import datetime
 from concurrent.futures import ProcessPoolExecutor
 import re
+import json
 import ast
 from abc import ABC, abstractmethod
 from typing import Dict
@@ -21,6 +22,10 @@ from itertools import product
 from sklearn.cluster import SpectralClustering
 from dbcv import dbcv
 import hdbscan
+from skbio.stats.distance import mantel
+from sklearn.manifold import MDS
+from scipy.spatial import procrustes
+import plotly.graph_objects as go
 
 from app_components.function_dump import (
     extractor,
@@ -449,7 +454,7 @@ class ComputeDistanceMatrices(Step):
             loaded_data = np.load(blosum_path)
             data['blosum_dist_matrix'] = loaded_data['matrix']
         else:
-            self.logger.log("ComputeDistanceMatrices → No BLOSUM cache. Processing distances...")
+            self.logger.log("ComputeDistanceMatrices → No BLOSUM cache. Processing with new normalization method...")
             try:
                 sequences = cdr_df['h3_chain'].tolist()
                 num_sequences = len(sequences)
@@ -459,8 +464,21 @@ class ComputeDistanceMatrices(Step):
                         score = self._calculate_blosum_score(sequences[i], sequences[j])
                         blosum_similarity_matrix[i, j] = blosum_similarity_matrix[j, i] = score
                 
-                max_blosum_score = np.max(blosum_similarity_matrix)
-                blosum_dist_matrix = max_blosum_score - blosum_similarity_matrix
+                self_scores = np.diag(blosum_similarity_matrix)
+                
+                sqrt_self_scores = np.sqrt(self_scores)
+                normalization_matrix = np.outer(sqrt_self_scores, sqrt_self_scores)
+                
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    normalized_similarity = np.where(
+                        normalization_matrix > 0,
+                        blosum_similarity_matrix / normalization_matrix,
+                        0 )
+
+                blosum_dist_matrix = 1 - normalized_similarity
+                
+                np.fill_diagonal(blosum_dist_matrix, 0)
+                
                 np.savez(blosum_path, matrix=blosum_dist_matrix, sequences=np.array(sequences, dtype=object))
                 self.logger.log(f"ComputeDistanceMatrices → Saved new BLOSUM distance matrix to {blosum_path}.")
                 data['blosum_dist_matrix'] = blosum_dist_matrix
@@ -471,10 +489,11 @@ class ComputeDistanceMatrices(Step):
         return data
 
 class TuneSNFParameters(Step):
-    def __init__(self, logger: FileLogger, k_range: list = [10, 20, 30], mu_range: list = [0.3, 0.5, 0.8]):
+    def __init__(self, logger: FileLogger):
         super().__init__(logger)
-        self.k_range = k_range
-        self.mu_range = mu_range
+        self.k_range = [5, 10, 15, 20, 25, 30, 35, 40]
+        self.mu_range = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+        #Removed the constructor call for range assignment, thinking of additional tweaks instead of hardcoding
 
     def _calculate_eigengap(self, affinity_matrix: np.ndarray, num_eig: int = 10) -> float:
         diag = np.sum(affinity_matrix, axis=1)
@@ -616,9 +635,10 @@ class HDBSCAN(Step):
         )
         cluster_labels = clusterer.fit_predict(fused_distance_matrix)
         
+        save_clusters_hdbscan = INTERNAL_FILES_DIR / "spectral_clusters.csv"
         clustered_df = full_embedding_df.copy()
         clustered_df['cluster_id'] = cluster_labels
-        data['final_clusters'] = clustered_df
+        clustered_df['cluster_id'].to_csv(save_clusters_hdbscan, index=False)
 
         outlier_mask = clustered_df['cluster_id'] == -1
         outlier_count = outlier_mask.sum()
@@ -650,10 +670,10 @@ class HDBSCAN(Step):
             x='umap_x', y='umap_y', color='cluster_id',
             color_continuous_scale=px.colors.qualitative.Vivid,
             hover_name='h3_chain', hover_data=['pdb_id', 'heavy_host_organism_name'], 
-            title=f'HDBSCAN Clustering on Fused Network (min_cluster_size={self.min_cluster_size}, DBCV_score = {score})'
+            title=f'UMAP Projection on HDBSCAN Clustering on Fused Network (min_cluster_size={self.min_cluster_size}, DBCV_score = {score})'
         )
         fig.for_each_trace(lambda t: t.update(marker_size=5) if t.name != '-1' else t.update(marker_size=3, marker_color='lightgrey'))
-        fig.update_layout(xaxis_title="UMAP 1", yaxis_title="UMAP 2")
+        fig.update_layout(xaxis_title="Projected X Dimension", yaxis_title="Projected Y Dimension")
         fig.write_html(interactive_plot_path)
 
         self.logger.log(f"HDBSCAN → Saved final plot to {interactive_plot_path}")
@@ -676,7 +696,7 @@ class Spectral_Clustering(Step):
         embedding_path = INTERNAL_FILES_DIR / 'snf_embedding.parquet' 
         cdr_data_path = COMPUTATION_DIR / 'cdr.csv'
 
-        if not all([fused_matrix_path.exists(), embedding_path.exists(), cdr_data_path.exists()]):
+        if not all([fused_matrix_path.exists(), embedding_path.exists(), cdr_data_path.exists()]): #Recognise this is kuch more efficient than what I was using before, might go back and change
             self.logger.log("SpectralClustering → SKIPPING: Required input file (matrix, embedding, or cdr) not found.")
             return data
 
@@ -694,13 +714,14 @@ class Spectral_Clustering(Step):
             n_clusters=self.n_clusters,
             affinity='precomputed',
             assign_labels='kmeans',
-            random_state=42
+            random_state=69
         )
         cluster_labels = clusterer.fit_predict(fused_affinity_matrix)
         
+        save_clusters_spec = INTERNAL_FILES_DIR / "spectral_clusters.csv"
         clustered_df = full_embedding_df.copy()
         clustered_df['cluster_id'] = cluster_labels
-        data['final_clusters'] = clustered_df
+        clustered_df['cluster_id'].to_csv(save_clusters_spec, index=False)
 
         interactive_plot_path = INTERNAL_FILES_DIR / 'spectral_cluster_plot.html'
         self.logger.log(f"SpectralClustering → Generating final interactive plot...")
@@ -713,7 +734,7 @@ class Spectral_Clustering(Step):
             color_discrete_sequence=px.colors.qualitative.Vivid,
             hover_name='h3_chain', 
             hover_data=['pdb_id', 'heavy_host_organism_name'], 
-            title=f'Spectral Clustering on Fused Network (k={self.n_clusters})'
+            title=f'UMAP Projection on Spectral Clustering on Fused Network (k={self.n_clusters})'
         )
         
         fig.update_traces(
@@ -721,8 +742,8 @@ class Spectral_Clustering(Step):
         )
         
         fig.update_layout(
-            xaxis_title="UMAP 1", 
-            yaxis_title="UMAP 2",
+            xaxis_title="Projected X Dimension", 
+            yaxis_title="Projected Y Dimension",
             legend_title_text='Cluster ID'
         )
         
@@ -731,4 +752,122 @@ class Spectral_Clustering(Step):
         self.logger.log(f"SpectralClustering → Saved final plot to {interactive_plot_path}")
         self.logger.log(f"SpectralClustering → Clustering complete. Found {self.n_clusters} clusters.")
         
+        return data
+
+class MantelTest(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        self.logger.log("MantelTest → Starting statistical comparison of distance matrices.")
+        
+        ctd_path = INTERNAL_FILES_DIR / 'ctd_dist_matrix.npz'
+        blosum_path = INTERNAL_FILES_DIR / 'blosum_dist_matrix.npz'
+
+        if not ctd_path.exists() or not blosum_path.exists():
+            self.logger.log("MantelTest → SKIPPING: One or both distance matrices not found.")
+            return data
+
+        self.logger.log("MantelTest → Loading distance matrices.")
+        ctd_dist_matrix = np.load(ctd_path)['matrix']
+        blosum_dist_matrix = np.load(blosum_path)['matrix']
+
+        self.logger.log("MantelTest → Performing Mantel test with 999 permutations...")
+        try:
+            r_val, p_val, _ = mantel(ctd_dist_matrix, blosum_dist_matrix, permutations=999)
+            self.logger.log(f"MantelTest → Test complete. r={r_val:.4f}, p-value={p_val:.4f}")
+
+            stats_summary = {'mantel_r': r_val, 'mantel_p_value': p_val}
+            summary_path = INTERNAL_FILES_DIR / 'matrix_comparison_stats.json'
+            with open(summary_path, 'w') as f:
+                json.dump(stats_summary, f, indent=4)
+            self.logger.log(f"MantelTest → Saved statistical summary to {summary_path}")
+            
+            self.logger.log("MantelTest → Generating indicator plot...")
+            fig = go.Figure()
+
+            fig.add_trace(go.Indicator(
+                mode = "number",
+                value = r_val,
+                title = {"text": f"Mantel Correlation (r)<br><span style='font-size:0.8em;color:gray'>p-value = {p_val:.4f}</span>"},
+                domain = {'x': [0, 1], 'y': [0, 1]}
+            ))
+
+            fig.update_layout(
+                title_text='Concordance between CTD and BLOSUM Matrices',
+                height=250 
+            )
+
+            plot_filepath = INTERNAL_FILES_DIR / 'mantel_test_plot.html'
+            fig.write_html(plot_filepath)
+            self.logger.log(f"MantelTest → Saved plot to {plot_filepath}")
+
+        except Exception as e:
+            self.logger.log(f"MantelTest → ERROR: Could not perform Mantel test: {e}")
+
+        return data
+
+class Procrustes_Analysis(Step):
+    def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        self.logger.log("ProcrustesAnalysis → Starting visual comparison of distance matrices.")
+
+        ctd_path = INTERNAL_FILES_DIR / 'ctd_dist_matrix.npz'
+        blosum_path = INTERNAL_FILES_DIR / 'blosum_dist_matrix.npz'
+        cdr_data_path = COMPUTATION_DIR / 'cdr.csv'
+
+        if not all([ctd_path.exists(), blosum_path.exists(), cdr_data_path.exists()]):
+            self.logger.log("ProcrustesAnalysis → SKIPPING: Required input file not found.")
+            return data
+
+        self.logger.log("ProcrustesAnalysis → Loading data.")
+        ctd_dist = np.load(ctd_path)['matrix']
+        blosum_dist = np.load(blosum_path)['matrix']
+        cdr_df = pd.read_csv(cdr_data_path)
+
+        self.logger.log("ProcrustesAnalysis → Applying MDS to generate coordinates...")
+        mds = MDS(n_components=2, dissimilarity='precomputed', random_state=42, normalized_stress=False)
+        ctd_coords = mds.fit_transform(ctd_dist)
+        blosum_coords = mds.fit_transform(blosum_dist)
+
+        self.logger.log("ProcrustesAnalysis → Performing Procrustes alignment...")
+        mtx1, mtx2, disparity = procrustes(ctd_coords, blosum_coords)
+        self.logger.log(f"ProcrustesAnalysis → Alignment complete. Disparity: {disparity:.4f}")
+
+        summary_path = INTERNAL_FILES_DIR / 'matrix_comparison_stats.json'
+        stats_summary = {}
+        if summary_path.exists():
+            with open(summary_path, 'r') as f:
+                stats_summary = json.load(f)
+        stats_summary['procrustes_disparity'] = disparity
+        with open(summary_path, 'w') as f:
+            json.dump(stats_summary, f, indent=4)
+        self.logger.log(f"ProcrustesAnalysis → Appended disparity score to {summary_path}")
+
+        df1 = pd.DataFrame({'x': mtx1[:, 0], 'y': mtx1[:, 1], 'method': 'CTD-based Space'})
+        df2 = pd.DataFrame({'x': mtx2[:, 0], 'y': mtx2[:, 1], 'method': 'BLOSUM-based Space'})
+        combined_df = pd.concat([df1, df2])
+        combined_df['h3_chain'] = np.tile(cdr_df['h3_chain'], 2)
+        combined_df['pdb_id'] = np.tile(cdr_df['pdb_id'], 2)
+        
+        self.logger.log("ProcrustesAnalysis → Generating plot...")
+
+        color_map = {
+            'CTD-based Space': '#1f77b4',
+            'BLOSUM-based Space': '#ff7f0e' 
+        }
+
+        fig = px.scatter(
+            combined_df, x='x', y='y', color='method',
+            color_discrete_map=color_map,
+            hover_data=['h3_chain', 'pdb_id'],
+            title=f'Procrustes Analysis of CTD vs BLOSUM Spaces (Disparity: {disparity:.4f})'
+        )
+
+        for i in range(len(mtx1)):
+            fig.add_shape(
+                type='line', x0=mtx1[i, 0], y0=mtx1[i, 1], x1=mtx2[i, 0], y1=mtx2[i, 1],
+                line=dict(color='rgba(128, 128, 128, 0.5)', width=1)
+            )
+        
+        plot_filepath = INTERNAL_FILES_DIR / 'procrustes_comparison.html'
+        fig.write_html(plot_filepath)
+        self.logger.log(f"ProcrustesAnalysis → Saved plot to {plot_filepath}")
+
         return data
