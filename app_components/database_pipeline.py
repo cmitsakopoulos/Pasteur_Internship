@@ -591,10 +591,10 @@ class FuseAndProject(Step):
             y='umap_y',
             hover_name='h3_chain',
             hover_data=['pdb_id', 'heavy_host_organism_name'], 
-            title='UMAP Projection of Fused CTD and BLOSUM Networks'
+            title='UMAP (Non-Linear) Projection of Fused CTD and BLOSUM Analyses'
         )
         fig.update_traces(marker=dict(size=5, opacity=0.8))
-        fig.update_layout(xaxis_title="UMAP Dimension 1", yaxis_title="UMAP Dimension 2")
+        fig.update_layout(xaxis_title="Projected X Dimension", yaxis_title="Projected Y Dimension")
         fig.write_html(plot_filepath)
         self.logger.log(f"FuseAndProject → Saved interactive plot to {plot_filepath}")
         
@@ -635,28 +635,43 @@ class HDBSCAN(Step):
         )
         cluster_labels = clusterer.fit_predict(fused_distance_matrix)
         
-        save_clusters_hdbscan = INTERNAL_FILES_DIR / "spectral_clusters.csv"
         clustered_df = full_embedding_df.copy()
         clustered_df['cluster_id'] = cluster_labels
-        clustered_df['cluster_id'].to_csv(save_clusters_hdbscan, index=False)
+        
+        save_clusters_hdbscan = INTERNAL_FILES_DIR / "snf_cluster.parquet"
+        clustered_df.to_parquet(save_clusters_hdbscan, index=False)
 
-        outlier_mask = clustered_df['cluster_id'] == -1
+        clustered_df['cluster_id'] = clustered_df['cluster_id'].astype(str).replace({'-1': 'Noise'})
+        sorted_ids = sorted(
+            clustered_df['cluster_id'].unique(), 
+            key=lambda x: -1 if x == 'Noise' else int(x)
+        )
+        
+        core_clusters = [c for c in sorted_ids if c != 'Noise']
+        color_map = {'Noise': 'lightgrey'}
+        palette = px.colors.qualitative.Vivid
+        for i, cluster_id in enumerate(core_clusters):
+            color_map[cluster_id] = palette[i % len(palette)]
+
+        outlier_mask = clustered_df['cluster_id'] == 'Noise'
         outlier_count = outlier_mask.sum()
         if outlier_count > 0:
             outlier_percentage = (outlier_count / len(clustered_df)) * 100
             self.logger.log(f"HDBSCAN → Outlier Check: Identified {outlier_count} noise points ({outlier_percentage:.2f}%).")
             data['outlier_sequences'] = clustered_df[outlier_mask]
 
-        core_points_mask = cluster_labels != -1
-        core_labels = cluster_labels[core_points_mask]
+        numeric_core_labels = cluster_labels[cluster_labels != -1]
         
-        if len(np.unique(core_labels)) >= 2:
+        score = 'N/A'
+        if len(np.unique(numeric_core_labels)) >= 2:
             self.logger.log("HDBSCAN → Calculating DBCV score on core cluster points...")
+            core_points_mask = cluster_labels != -1
             core_distance_matrix = fused_distance_matrix[core_points_mask, :][:, core_points_mask]
             try:
-                score = dbcv(core_distance_matrix, core_labels)
-                self.logger.log(f"HDBSCAN → Calculated DBCV Score: {score:.4f} (higher is better)")
-                data['dbcv_score'] = score
+                dbcv_score = dbcv(core_distance_matrix, numeric_core_labels)
+                score = f"{dbcv_score:.4f}"
+                self.logger.log(f"HDBSCAN → Calculated DBCV Score: {score}")
+                data['dbcv_score'] = dbcv_score
             except Exception as e:
                 self.logger.log(f"HDBSCAN → ERROR - cannot not compute DBCV score: {e}")
         else:
@@ -665,15 +680,25 @@ class HDBSCAN(Step):
         interactive_plot_path = INTERNAL_FILES_DIR / 'snf_cluster_plot.html'
         self.logger.log(f"HDBSCAN → Generating final interactive plot...")
         
+        clustered_df['marker_size'] = clustered_df['cluster_id'].apply(lambda x: 3 if x == 'Noise' else 5)
+
         fig = px.scatter(
             clustered_df,
             x='umap_x', y='umap_y', color='cluster_id',
-            color_continuous_scale=px.colors.qualitative.Vivid,
+            size='marker_size',
+            category_orders={'cluster_id': sorted_ids},
+            color_discrete_map=color_map,
             hover_name='h3_chain', hover_data=['pdb_id', 'heavy_host_organism_name'], 
             title=f'UMAP Projection on HDBSCAN Clustering on Fused Network (min_cluster_size={self.min_cluster_size}, DBCV_score = {score})'
         )
-        fig.for_each_trace(lambda t: t.update(marker_size=5) if t.name != '-1' else t.update(marker_size=3, marker_color='lightgrey'))
-        fig.update_layout(xaxis_title="Projected X Dimension", yaxis_title="Projected Y Dimension")
+        fig.update_traces(
+            marker=dict(size=7, line=dict(width=1, color='Black'))
+        )
+        fig.update_layout(
+            xaxis_title="Projected X Dimension", 
+            yaxis_title="Projected Y Dimension",
+            legend_title_text='Cluster ID'
+        )
         fig.write_html(interactive_plot_path)
 
         self.logger.log(f"HDBSCAN → Saved final plot to {interactive_plot_path}")
@@ -696,7 +721,7 @@ class Spectral_Clustering(Step):
         embedding_path = INTERNAL_FILES_DIR / 'snf_embedding.parquet' 
         cdr_data_path = COMPUTATION_DIR / 'cdr.csv'
 
-        if not all([fused_matrix_path.exists(), embedding_path.exists(), cdr_data_path.exists()]): #Recognise this is kuch more efficient than what I was using before, might go back and change
+        if not all([fused_matrix_path.exists(), embedding_path.exists(), cdr_data_path.exists()]):
             self.logger.log("SpectralClustering → SKIPPING: Required input file (matrix, embedding, or cdr) not found.")
             return data
 
@@ -718,19 +743,24 @@ class Spectral_Clustering(Step):
         )
         cluster_labels = clusterer.fit_predict(fused_affinity_matrix)
         
-        save_clusters_spec = INTERNAL_FILES_DIR / "spectral_clusters.csv"
+        save_clusters_spec = INTERNAL_FILES_DIR / "spectral_cluster.parquet"
         clustered_df = full_embedding_df.copy()
         clustered_df['cluster_id'] = cluster_labels
-        clustered_df['cluster_id'].to_csv(save_clusters_spec, index=False)
+        clustered_df['cluster_id'] = clustered_df['cluster_id'].astype(str).replace({'-1': 'Noise'})
+        clustered_df.to_parquet(save_clusters_spec, index=False)
 
         interactive_plot_path = INTERNAL_FILES_DIR / 'spectral_cluster_plot.html'
         self.logger.log(f"SpectralClustering → Generating final interactive plot...")
+        
+        clustered_df['cluster_id'] = clustered_df['cluster_id'].astype(str)
+        sorted_ids = sorted(clustered_df['cluster_id'].unique(), key=int)
         
         fig = px.scatter(
             clustered_df,
             x='umap_x', 
             y='umap_y', 
-            color=clustered_df['cluster_id'].astype(str),
+            color='cluster_id',
+            category_orders={'cluster_id': sorted_ids},
             color_discrete_sequence=px.colors.qualitative.Vivid,
             hover_name='h3_chain', 
             hover_data=['pdb_id', 'heavy_host_organism_name'], 
@@ -753,7 +783,7 @@ class Spectral_Clustering(Step):
         self.logger.log(f"SpectralClustering → Clustering complete. Found {self.n_clusters} clusters.")
         
         return data
-
+    
 class MantelTest(Step):
     def process(self, data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
         self.logger.log("MantelTest → Starting statistical comparison of distance matrices.")
@@ -857,7 +887,7 @@ class Procrustes_Analysis(Step):
             combined_df, x='x', y='y', color='method',
             color_discrete_map=color_map,
             hover_data=['h3_chain', 'pdb_id'],
-            title=f'Procrustes Analysis of CTD vs BLOSUM Spaces (Disparity: {disparity:.4f})'
+            title=f'MDS (Linear) Projection and Procrustes Comparison of CTD vs BLOSUM Spaces (Disparity: {disparity:.4f})'
         )
 
         for i in range(len(mtx1)):
