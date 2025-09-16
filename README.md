@@ -1,8 +1,8 @@
-# Pasteur_Internship
+# NAb Clusterer
 
 ## Introduction
 
-The main scope of my internship at the Hellenic Pasteur Institute involved analysing the polyreactive behaviour of Natural Antibodies (NAbs), in order to ascertain the mechanisms of epitopic valency through a combination of Amino Acid (AA) and biophysical descriptors. Publicly available NAb **CDR3H loop** and corresponding antigenic **epitope** sequence data were collected to compute their AA sequence biophysical descriptors (i.e. Natural Antibody Database). Sequence and biophysical descriptor data were then used in protracted clustering analysis, automated by the platform. Following multiple tests and modifications, a final design was decided upon with platform able to:
+The main scope of my internship at the **Hellenic Pasteur Institute** involved analysing the polyreactive behaviour of Natural Antibodies (NAbs), in order to ascertain the mechanisms of epitopic valency through a combination of Amino Acid (AA) and biophysical descriptors. Publicly available NAb **CDR3H loop** and corresponding antigenic **epitope** sequence data were collected to compute their AA sequence biophysical descriptors (i.e. Natural Antibody Database). Sequence and biophysical descriptor data were then used in protracted clustering analysis, automated by the platform. Following multiple tests and modifications, a final design was decided upon with platform able to:
 
 - Compute Composition Transition and Distribution (CTD) statistics on each protein sequence received; mimicing LISA statistics but providing further morphological and AA composition context.
 - Automate BLOSUM45 pairwise comparison between sequences.
