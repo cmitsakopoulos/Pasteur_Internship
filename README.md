@@ -4,7 +4,7 @@
 
 The main scope of my internship at the Hellenic Pasteur Institute involved analysing the polyreactive behaviour of Natural Antibodies (NAbs), in order to ascertain the mechanisms of epitopic valency through a combination of Amino Acid (AA) and biophysical descriptors. Publicly available NAb **CDR3H loop** and corresponding antigenic **epitope** sequence data were collected to compute their AA sequence biophysical descriptors (i.e. Natural Antibody Database). Sequence and biophysical descriptor data were then used in protracted clustering analysis, automated by the platform. Following multiple tests and modifications, a final design was decided upon with platform able to:
 
-- Compute Composition Transition and Distribution (CTD) statistics on each protein sequence received; mimicing LISA statistics but offering larger-detail based-depth.
+- Compute Composition Transition and Distribution (CTD) statistics on each protein sequence received; mimicing LISA statistics but providing further morphological and AA composition context.
 - Automate BLOSUM45 pairwise comparison between sequences.
 - Identify O and N glycosylation sites, through regular expression formulae and small optimised algorithms.
 - Parse foreign `csv` formats, merge to internal storage system, update database with computed statistics / metadata on all NAbs.
@@ -16,22 +16,28 @@ The purpose of this design is to enable a user to use known NAb - to antigen -  
 
 # Pipeline GUI
 
-On the welcome page, you are greeted with a request to upload an example `.csv` (ex. protein sequences with some metadata of your project), this example is scanned by the system which then provides you a list of data columns that you can include in your analysis. Importantly, to save time and effort for the user, instead of formatting your `.csv` file to match the style used by the platform's backend, your selections on the dropdown list will send instructions to the system on how to parse your project's `.csv` files.
-
 ### Welcome Page
+On the welcome page, you are greeted with a request to upload an example `.csv` (ex. protein sequences with some metadata of your project), this example is scanned by the system which then provides you a list of data columns that you can include in your analysis. Importantly, to save time and effort for the user, instead of formatting your `.csv` file to match the style used by the platform's backend, your selections on the dropdown list will send instructions to the system on how to parse your project's `.csv` files.
 ![welcome_page](./Images/welcome_page_early.png)
+
+### Analysis Page (Main)
 
 Navigating the platform from the sidebar on the left, you can select the "*Clustering Analysis*" to show the central analysis page. On this page you have dropdown blocks, on which you can:
 
 - **Process Raw Data**: Offers the user to designate their folder / directory where their project `.csv` files are stored, for the system to access and process automatically once the user commences analysis by clicking "*Execute Pipeline*". 
     - Note that the system can detect reruns, if the user introduces new files to their directory, select the "Rerun" option.
 - **Separate CTD/BLOSUM Descriptor Analysis**: Compare and contrast the capabilities of BLOSUM based pairwise comparison between your NAbs and the CTD strategy developed for this project. You can perform a PROCRUSTES comparison between CTD and BLOSUM networks, as well as a Mantel test - comparing the separate CTD and BLOSUM affinity matrices.
+- **Similarity Network Fusion CTD+BLOSUM Analysis**: Compute CTD and BLOSUM NAb affinity matrices - fuse into a singular affinity matrix through Similar Network Fusion - project into space with UMAP. Finally, the user can select to perform clustering with HDBSCAN and/or Spectral methods; this process can be repeated as many times as needed, while the user tunes their hyperparameters. Note: Interactive graphs will appear on the right, a dropdown list enables switching between all generated graphs.
+- **Inspect a Data File**: Upload a `.csv` and observe contents (no write permisions). Meant as a faster alternative to Excel based `.csv` viewers.
 
-Leveraging techniques used in Support Vector Machines for understanding protein sequences, i.e. CTD statistics, were used distinguish proteins and gain a low level "understanding" of their morphology and reactivity - without need for 3D data from ex. X-Ray diffraction. By generating normalised pairwise distance matrices of CDR3H, CTD statistics and BLOSUM45 comparisons, I convert the distances to affinities, then perform similarity network fusion to conjoin CTD and BLOSUM pairwise affinities to generate a single fused matrix for clustering analysis. All of this, wrapped in a Python based - local host server - graphical interface, will allow a user to cluster (HDBSCAN / Spectral) their CDR3H sequences, with parsing, computation, storage and visualisation tasks fully automated by an Object Oriented backend. Therefore, instead of imputing CDR3H valencies, one can observe the clusters to which CDR3H sequences with no known antigen belong to and draw conclusions from there.
-
-### Projection of distance matrix to space
-### Clustering upon distance projection
+A zoomed out example of the GUI platform parked at this page. 
 ![cluster_example](./Images/clustering_early.png)
+
+### Sub-clustering Page
+
+On this page you are greeted with a zoomed in version of the clustered (interactive) graphs you generated in the analysis page. A drop down list lets you choose between displaying either Spectral or HDBSCAN clustering results. Scrolling down, you are given the option of selecting specific clusters of interest and clustering them alone, using either algorithms offered before (more options are aimed to be implemented). Once sub-clusters are generated, a new interactive graph appears and you get given the option to scroll through a records list below the graph, where you are given the option to select what metadata you want to display for each point in the graph. As such, you can cross-reference points on the graph with complete metadata records for each point.
+
+![sub_clustering](./Images/subcluster.png)
 
 # Pipeline CLI (Under development)
 
@@ -54,3 +60,13 @@ The data generated by the CLI platform were used to train machine learning model
 As it later became clear, the scarcity of publicly available data unreservedly hindered ML model training; with efforts to identify an optimal model that can handle learning from a dataset size of 1.2k records, proving futile. As such, any further experimentation was stopped, prompting for the project's methodology to be changed such that: the data processing pipeline becomes a centre point of development, not only automating every step of data preprocessing but also tackling data analysis itself (i.e. replacing standalone ML approaches). 
 
 **Therefore, the objective shifted from imputing epitopes with high specificty, to a more pragmatic approach which seeks to approximate antibody epitopes through clustering techniques, overcoming the issue of restricted data availability, but accompanied with its own limitations.**
+
+# Influential References
+
+Aggarwal, C. C., Hinneburg, A., and Keim, D. A. (2001) On the Surprising Behavior of Distance Metrics in High Dimensional Space. Database Theory — ICDT 2001 1973: 420–434.
+
+Govindan, G., and Nair, A. S. (2011) Composition, Transition and Distribution (CTD) — A dynamic feature for predictions based on hierarchical structure of cellular sorting. 2011 Annual IEEE India Conference : 1–6. doi:https://doi.org/10.1109/indcon.2011.6139332.
+
+Milena Vujović, Paolo Marcatili, Chain, B., Kaplinsky, J., and Thomas Lars Andresen (2023) Signatures of T cell immunity revealed using sequence similarity with TCRDivER algorithm. Communications Biology 6(1).
+
+Zheng, X., Wang, Y., Tian, K., Zhou, J., Guan, J., Luo, L., and Zhou, S. (2017) Fusing multiple protein-protein similarity networks to effectively predict lncRNA-protein interactions. BMC Bioinformatics 18(S12).
